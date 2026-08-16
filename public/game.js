@@ -13,7 +13,9 @@ const KIND_COUNT = 5;
 // selectors (cast sig) — must match MonadMeadow.sol
 const SEL = {
   mintItem: "0x3565a4ff", // mintItem(uint8)
-  claimReward: "0x0fc14592", // claimReward(uint8)
+  claimReward: "0x689f1623", // claimReward(uint8)
+  claimDragonBounty: "0x64d80eb1", // claimDragonBounty()
+  payDeathPenalty: "0xa9cc471f", // payDeathPenalty()
   list: "0x67d36903", // list(uint256,uint96)
   cancelListing: "0x305a67a8", // cancelListing(uint256)
   buy: "0xd96a094a", // buy(uint256)
@@ -223,7 +225,7 @@ function explorerTx(h) {
 
 // ------------------------------------------------------------------ game state
 const world = { w: 2400, h: 1600 };
-let me = null; // {id,name,color,x,y,facing}
+let me = null; // {id,name,color,x,y,facing,health}
 const players = new Map(); // id -> {name,color,x,y,facing, rx,ry}
 const crystals = new Map(); // id -> {x,y,kind,phase}
 const satchel = [0, 0, 0, 0, 0]; // gathered-but-unminted counts by kind
@@ -232,6 +234,14 @@ const confetti = [];
 let nearestCrystal = null;
 let meMoving = false, meDir = 1;
 const touchVec = { x: 0, y: 0 }; // from the on-screen joystick (mobile)
+
+// Dragon boss fight system
+let dragon = null; // {x, y, health, maxHealth, lastAttack, phase}
+let dungeonBounds = null; // {x0, y0, x1, y1} dungeon area
+let playerHealth = 100; // player health points
+const PLAYER_MAX_HEALTH = 100;
+const DRAGON_HEALTH = 50;
+let dragonDefeated = false;
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
@@ -471,6 +481,24 @@ function buildWorld() {
     place("dungeon", rnd() < 0.5 ? T.chest : T.barrel, c, r, 34, "prop");
   }
 
+  // --- dragon boss --------------------------------------------------------
+  dungeonBounds = {
+    x0: dungeon.c0 * TILE,
+    y0: dungeon.r0 * TILE,
+    x1: dungeon.c1 * TILE + TILE,
+    y1: dungeon.r1 * TILE + TILE
+  };
+  dragon = {
+    x: (dungeon.c0 + dungeon.c1) * TILE / 2,
+    y: (dungeon.r0 + dungeon.r1) * TILE / 2,
+    health: DRAGON_HEALTH,
+    maxHealth: DRAGON_HEALTH,
+    lastAttack: 0,
+    phase: 0
+  };
+  dragonDefeated = false;
+  playerHealth = PLAYER_MAX_HEALTH;
+
   decor.sort((a, b) => a.ay - b.ay);
   for (let i = 0; i < 40; i++) motes.push({ x: rnd() * world.w, y: rnd() * world.h, sp: 4 + rnd() * 10, ph: rnd() * 6.28, a: 0.08 + rnd() * 0.14 });
 }
@@ -489,6 +517,17 @@ addEventListener("keydown", (e) => {
 addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 $("chatInput").addEventListener("focus", () => (typing = true));
 $("chatInput").addEventListener("blur", () => (typing = false));
+
+// Click/tap for dragon attacks
+addEventListener("click", () => {
+  if (me && dragon && !dragonDefeated && playerHealth > 0) {
+    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
+                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+    if (inDungeon) {
+      keys["click"] = true;
+    }
+  }
+});
 
 function tryGather() {
   if (!nearestCrystal || !ws || ws.readyState !== 1) return;
@@ -642,6 +681,36 @@ function update(dt, now) {
       if (d < best) { best = d; nearestCrystal = c; }
     }
   }
+
+  // --- dragon combat system ------------------------------------------------
+  if (me && dragon && !dragonDefeated) {
+    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
+                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+    
+    if (inDungeon) {
+      // Player takes damage from being in dungeon with dragon
+      if (now - dragon.lastAttack > 1000) {
+        playerHealth -= 5;
+        dragon.lastAttack = now;
+        toast("🐉 Dragon attacks! -5 HP");
+        if (playerHealth <= 0) {
+          handlePlayerDeath();
+        }
+      }
+      
+      // Check if player is attacking dragon (clicked/tapped)
+      if (keys["click"]) {
+        dragon.health -= 3;
+        keys["click"] = false;
+        toast("⚔️ Hit! Dragon -3 HP");
+        
+        if (dragon.health <= 0) {
+          handleDragonDefeat();
+        }
+      }
+    }
+  }
+
   // confetti
   for (let i = confetti.length - 1; i >= 0; i--) {
     const p = confetti[i];
@@ -693,7 +762,7 @@ function render(now) {
     ctx.fill();
   }
 
-  // build y-sorted draw list of decor + crystals + players
+  // build y-sorted draw list of decor + crystals + players + dragon
   const pad = 80;
   const items = [];
   for (const d of decor) {
@@ -703,12 +772,14 @@ function render(now) {
   for (const c of crystals.values()) items.push({ ay: c.y, t: 1, c });
   for (const p of players.values()) items.push({ ay: p.ry, t: 2, p, self: false });
   if (me) items.push({ ay: me.y, t: 2, p: me, self: true });
+  if (dragon && !dragonDefeated) items.push({ ay: dragon.y, t: 3, d: dragon });
   items.sort((a, b) => a.ay - b.ay);
 
   for (const it of items) {
     if (it.t === 0) drawDecor(it.d, now);
     else if (it.t === 1) drawCrystal(it.c, now);
-    else drawPlayer(it.p, now, it.self);
+    else if (it.t === 2) drawPlayer(it.p, now, it.self);
+    else if (it.t === 3) drawDragon(it.d, now);
   }
 
   // confetti on top
@@ -720,6 +791,37 @@ function render(now) {
   }
 
   ctx.restore();
+
+  // Draw player health HUD (screen-space, not world-space)
+  if (me && dragon && !dragonDefeated) {
+    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
+                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+    if (inDungeon || playerHealth < PLAYER_MAX_HEALTH) {
+      const hx = 20, hy = 80;
+      const hw = 200, hh = 20;
+      
+      // Background
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(hx - 5, hy - 5, hw + 10, hh + 10);
+      
+      // Health bar border
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(hx, hy, hw, hh);
+      
+      // Health bar fill
+      const healthPercent = playerHealth / PLAYER_MAX_HEALTH;
+      const barColor = healthPercent > 0.5 ? "#00cc44" : healthPercent > 0.25 ? "#ffaa00" : "#ff3300";
+      ctx.fillStyle = barColor;
+      ctx.fillRect(hx, hy, hw * healthPercent, hh);
+      
+      // Health text
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px Segoe UI";
+      ctx.textAlign = "center";
+      ctx.fillText(`HP: ${Math.max(0, Math.round(playerHealth))}/${PLAYER_MAX_HEALTH}`, hx + hw / 2, hy + 15);
+    }
+  }
 }
 
 function drawWater(w, now) {
@@ -810,6 +912,113 @@ function drawCrystal(c, now) {
     ctx.fillStyle = "rgba(70,80,99,0.8)";
     ctx.font = "600 11px Segoe UI";
     ctx.fillText("Space to gather", c.x, y - 20);
+  }
+}
+
+function drawDragon(d, now) {
+  const pulse = 0.5 + 0.5 * Math.sin(now / 400) * d.health / d.maxHealth;
+  const isAlive = d.health > 0;
+  
+  // Dragon glow aura (red/dark red)
+  const rg = ctx.createRadialGradient(d.x, d.y, 5, d.x, d.y, 80);
+  rg.addColorStop(0, "#cc2200aa");
+  rg.addColorStop(1, "#660000" + (isAlive ? "44" : "00"));
+  ctx.fillStyle = rg;
+  ctx.beginPath(); ctx.arc(d.x, d.y, 80, 0, 6.28); ctx.fill();
+  
+  // Dragon body (large red shape)
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.scale(isAlive ? 1 : 0.5, isAlive ? 1 : 0.5);
+  
+  // Body
+  ctx.fillStyle = "#cc2200";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 28, 22, 0, 0, 6.28);
+  ctx.fill();
+  
+  // Head
+  ctx.beginPath();
+  ctx.arc(35, -8, 18, 0, 6.28);
+  ctx.fill();
+  
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(-25, 0);
+  ctx.quadraticCurveTo(-50, -15, -55, -35);
+  ctx.strokeStyle = "#cc2200";
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  
+  // Eyes
+  ctx.fillStyle = "#ffff00";
+  ctx.beginPath(); ctx.arc(40, -12, 6, 0, 6.28); ctx.fill();
+  ctx.fillStyle = "#000";
+  ctx.beginPath(); ctx.arc(42, -12, 3, 0, 6.28); ctx.fill();
+  
+  // Mouth (menacing)
+  ctx.strokeStyle = "#990000";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(50, -5, 8, 3.5, 6.1);
+  ctx.stroke();
+  
+  // Spikes on back
+  for (let i = -2; i <= 2; i++) {
+    ctx.fillStyle = "#990000";
+    ctx.beginPath();
+    ctx.moveTo(i * 12, -20);
+    ctx.lineTo(i * 12 - 4, -35);
+    ctx.lineTo(i * 12 + 4, -35);
+    ctx.closePath();
+    ctx.fill();
+  }
+  
+  // Wings (folded)
+  ctx.fillStyle = "rgba(102, 0, 0, 0.6)";
+  ctx.beginPath();
+  ctx.moveTo(0, -10);
+  ctx.lineTo(-40, -30);
+  ctx.lineTo(-35, 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0, -10);
+  ctx.lineTo(40, -30);
+  ctx.lineTo(35, 5);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.restore();
+  
+  // Health bar
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.fillRect(d.x - 50, d.y - 65, 100, 10);
+  
+  const healthPercent = Math.max(0, d.health / d.maxHealth);
+  const healthColor = healthPercent > 0.5 ? "#ff3300" : healthPercent > 0.25 ? "#ff6600" : "#cc0000";
+  ctx.fillStyle = healthColor;
+  ctx.fillRect(d.x - 50, d.y - 65, 100 * healthPercent, 10);
+  
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(d.x - 50, d.y - 65, 100, 10);
+  
+  // Health text
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 12px Segoe UI";
+  ctx.textAlign = "center";
+  ctx.fillText(`DRAGON HP: ${Math.max(0, Math.round(d.health))}/${d.maxHealth}`, d.x, d.y - 80);
+  
+  // Instructions
+  if (me && dungeonBounds) {
+    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
+                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+    if (inDungeon) {
+      ctx.fillStyle = isAlive ? "rgba(255,100,0,0.9)" : "rgba(100,255,100,0.9)";
+      ctx.font = "600 14px Segoe UI";
+      ctx.fillText(isAlive ? "⚔️ ATTACK! (Click/Tap)" : "🎉 DRAGON DEFEATED!", d.x, d.y + 75);
+    }
   }
 }
 
@@ -919,6 +1128,57 @@ async function claimCrystalReward(kind) {
     // Silently fail if claim fails (e.g., on cooldown or insufficient funds)
     console.log("Could not claim reward:", e.message);
   }
+}
+
+// ------------------------------------------------------------------ dragon combat
+async function handleDragonDefeat() {
+  dragonDefeated = true;
+  toast("🐉 DRAGON DEFEATED! 🎉 You earned 10 MON!", 5000);
+  celebrate(0);
+  burstConfetti(me ? me.id : "dragon", 0);
+  
+  // Award 10 MON to player via blockchain
+  if (wallet.connected) {
+    try {
+      const h = await sendTx({ data: SEL.claimDragonBounty });
+      toastTx(`🐉 Dragon Bounty Claimed!`, h);
+      waitForReceipt(h).then(() => { refreshBalance(); });
+    } catch (e) {
+      console.log("Dragon bounty claim error:", e.message);
+      toast("Error claiming dragon bounty: " + e.message);
+    }
+  }
+}
+
+async function handlePlayerDeath() {
+  if (!me || !wallet.connected) {
+    playerHealth = PLAYER_MAX_HEALTH;
+    dragon.health = DRAGON_HEALTH;
+    dragonDefeated = false;
+    toast("You died! Health reset.", 3000);
+    return;
+  }
+
+  toast("💀 You died! You lost 5 MON!", 5000);
+  burstConfetti(me.id, 4);
+  
+  // Deduct 5 MON from player via blockchain
+  try {
+    const h = await sendTx({ data: SEL.payDeathPenalty, value: BigInt(5 * 1e18) });
+    toastTx(`💀 Death Penalty Paid`, h);
+    waitForReceipt(h).then(() => { refreshBalance(); });
+  } catch (e) {
+    console.log("Death penalty error:", e.message);
+    toast("Error paying death penalty: " + e.message);
+  }
+  
+  // Reset player for another attempt
+  playerHealth = PLAYER_MAX_HEALTH;
+  dragon.health = DRAGON_HEALTH;
+  dragonDefeated = false;
+  me.x = 100;
+  me.y = 100;
+  toast("You respawn at the meadow entrance...", 2000);
 }
 
 async function openMintModal(kind) {

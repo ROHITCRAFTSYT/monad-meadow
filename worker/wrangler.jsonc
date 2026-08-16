@@ -12,7 +12,7 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorldRoom"] }],
   "vars": {
-    "CONTRACT_ADDRESS": "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f"
+    "CONTRACT_ADDRESS": "0xe8B6c37f78475024a5d08DB3dF358983a45357A7"
   },
   "observability": { "enabled": true }
 }

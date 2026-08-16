@@ -161,6 +161,25 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
         emit RewardClaimed(msg.sender, kind, reward);
     }
 
+    /// @notice Claim dragon bounty: 10 MON for defeating the dungeon dragon.
+    function claimDragonBounty() external nonReentrant {
+        require(address(this).balance >= 10 ether, "InsufficientRewardFunds");
+        
+        uint256 bounty = 10 ether;
+        (bool ok,) = payable(msg.sender).call{value: bounty}("");
+        if (!ok) revert TransferFailed();
+        
+        emit RewardClaimed(msg.sender, 99, bounty); // Kind 99 = dragon bounty
+    }
+
+    /// @notice Deduct death penalty: loses 5 MON for dying to the dragon.
+    ///         Player must send 5 MON to contract.
+    function payDeathPenalty() external payable nonReentrant {
+        if (msg.value != 5 ether) revert WrongPrice();
+        treasury += msg.value;
+        // No refund - penalty stays in treasury
+    }
+
     // ---------------------------------------------------------------------
     // Marketplace (trade items for MON)
     // ---------------------------------------------------------------------
