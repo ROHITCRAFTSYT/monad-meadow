@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "monad-meadow",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-15",
+  "assets": {
+    "directory": "../public",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "WORLD_ROOM", "class_name": "WorldRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorldRoom"] }],
+  "vars": {
+    "CONTRACT_ADDRESS": "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f"
+  },
+  "observability": { "enabled": true }
+}

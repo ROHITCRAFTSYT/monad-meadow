@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Monad Meadow — a calm onchain world</title>
+    <meta name="description" content="Wander a calm shared meadow, gather glowing crystals, and mint or trade them for MON on Monad testnet." />
+    <link rel="preconnect" href="https://testnet-rpc.monad.xyz" />
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='16,4 26,16 16,28 6,16' fill='%238fd3c7'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <!-- Top bar -->
+    <header class="hud top">
+      <div class="brand">
+        <span class="logo">◈</span>
+        <div>
+          <div class="title">Monad Meadow</div>
+          <div class="sub" id="presence">connecting…</div>
+        </div>
+      </div>
+      <div class="wallet">
+        <div class="netpill" id="netpill">Monad Testnet</div>
+        <button id="connectBtn" class="btn primary">Connect Wallet</button>
+        <div class="acct hidden" id="acct">
+          <span id="acctAddr">—</span>
+          <span class="bal" id="acctBal">0 MON</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Inventory / mint (bottom-left) -->
+    <section class="hud panel bottom-left" id="satchel">
+      <div class="panel-h">Your satchel <span class="hint">gathered, not yet onchain</span></div>
+      <div class="satchel-grid" id="satchelGrid"></div>
+      <div class="satchel-empty" id="satchelEmpty">Walk up to a crystal and press <kbd>Space</kbd> to gather.</div>
+    </section>
+
+    <!-- Marketplace (right) -->
+    <section class="hud panel right" id="market">
+      <div class="panel-h">
+        Meadow Market <span class="hint">trade crystals for MON</span>
+        <button class="mini" id="refreshMarket" title="Refresh">⟳</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="listings">For sale</button>
+        <button class="tab" data-tab="mine">My crystals</button>
+      </div>
+      <div class="market-list" id="marketList"></div>
+      <div class="market-list hidden" id="mineList"></div>
+    </section>
+
+    <!-- Chat (bottom-right) -->
+    <section class="hud panel bottom-right" id="chat">
+      <div class="chat-log" id="chatLog"></div>
+      <form class="chat-form" id="chatForm">
+        <input id="chatInput" maxlength="140" placeholder="say something kind…" autocomplete="off" />
+      </form>
+    </section>
+
+    <!-- Controls hint + audio -->
+    <div class="hud controls">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+      <span><kbd>Space</kbd> gather</span>
+      <button id="audioBtn" class="mini" title="Ambient sound">♪ off</button>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Mint / list modal -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="modalCancel">Cancel</button>
+          <button class="btn primary" id="modalConfirm">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/game.js"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+# deps
+node_modules/
+**/node_modules/
+contracts/dependencies/
+
+# foundry build + SENSITIVE (cache stores deploy private keys)
+contracts/out/
+contracts/cache/
+contracts/broadcast/**/dry-run/
+
+# cloudflare
+.wrangler/
+**/.wrangler/
+
+# downloaded asset sources (extracted packs); shipped art lives in public/assets/
+assets_src/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

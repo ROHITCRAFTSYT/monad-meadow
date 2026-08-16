@@ -1,0 +1,21 @@
+{
+  "name": "monad-meadow",
+  "description": "Calm 2D multiplayer world with onchain crystal minting & trading on Monad",
+  "network": "monad-testnet",
+  "chainId": 10143,
+  "contracts": {
+    "MonadMeadow": "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f"
+  },
+  "explorer": "https://testnet.monadscan.com/address/0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f",
+  "features": [
+    "erc721",
+    "onchain-marketplace",
+    "onchain-svg-metadata",
+    "realtime-multiplayer"
+  ],
+  "stack": [
+    "foundry",
+    "cloudflare-workers",
+    "durable-objects"
+  ]
+}

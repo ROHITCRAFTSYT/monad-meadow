@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["dependencies"]
+test = "test"
+script = "script"
+evm_version = "prague"
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+fs_permissions = [{ access = "read", path = "./" }]
+
+[soldeer]
+remappings_generate = true
+remappings_location = "txt"
+
+[dependencies]
+"@openzeppelin-contracts" = "5.1.0"
+forge-std = "1.9.4"
+
+[rpc_endpoints]
+monad_testnet = "https://testnet-rpc.monad.xyz"
