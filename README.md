@@ -12,9 +12,9 @@ The four hackathon-required items:
 
 | Item | Value |
 | --- | --- |
-| **Live URL** | `https://monad-meadow.<your-subdomain>.workers.dev` — _placeholder; filled in after `wrangler deploy` (see [Run it yourself](#run-it-yourself))_ |
+| **Live URL** | **<https://monad-meadow.lorq.workers.dev>** |
 | **Contract address** | [`0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f`](https://testnet.monadscan.com/address/0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f) on Monad Testnet (chainId **10143**) — source-verified on **MonadScan** and **MonadVision** |
-| **GitHub repo** | `https://github.com/<your-org>/monad-meadow` — _placeholder; add your repo URL_ |
+| **GitHub repo** | `https://github.com/ROHITCRAFTSYT/monad-meadow` |
 | **Deployment** | **Cloudflare Workers** (frontend + realtime multiplayer) + **Monad Testnet** (smart contract) |
 
 **Example live mint transaction:** [`0x6a9ecb6b82bbe298b7bdbdd658da3eca0871d8169f67961c2cc0e747433f6bdc`](https://testnet.monadscan.com/tx/0x6a9ecb6b82bbe298b7bdbdd658da3eca0871d8169f67961c2cc0e747433f6bdc)
@@ -107,7 +107,7 @@ cd worker && npx wrangler login
 cd worker && npm install && npx wrangler deploy
 ```
 
-`wrangler deploy` prints your live URL — `https://monad-meadow.<your-subdomain>.workers.dev`. Paste it into the [Live](#live) table above.
+`wrangler deploy` prints your live URL — `https://monad-meadow.lorq.workers.dev`. Paste it into the [Live](#live) table above.
 
 ### (c) Local dev
 
