@@ -125,12 +125,31 @@ async function connectWallet() {
     await ensureChain();
     wallet.addr = accts[0];
     wallet.connected = true;
+    try { localStorage.setItem("mm_wallet", "1"); } catch {}
     updateWalletUI();
     refreshBalance();
     refreshMarket();
   } catch (e) {
     toast("Wallet connection cancelled.");
   }
+}
+
+// silently restore a previously-authorized wallet on page load (no popup)
+async function tryReconnectWallet() {
+  if (!hasWallet()) return;
+  try {
+    if (localStorage.getItem("mm_wallet") !== "1") return;
+  } catch { return; }
+  try {
+    const accts = await window.ethereum.request({ method: "eth_accounts" });
+    if (accts && accts.length) {
+      wallet.addr = accts[0];
+      wallet.connected = true;
+      updateWalletUI();
+      refreshBalance();
+      refreshMarket();
+    }
+  } catch {}
 }
 async function refreshBalance() {
   if (!wallet.addr) return;
@@ -237,8 +256,12 @@ let GCOLS = 0, GROWS = 0;
 let ground = [];       // [{sheet,idx}] per cell
 let dungeonMask = [];  // bool per cell
 const decor = [];      // static objects {wx,wy,sheet,idx,size,ay}
+const colliders = [];  // solid boxes {l,t,r,b} the player can't walk through
 const motes = [];
 const gemTint = [];    // 5 pre-tinted gem canvases
+
+// MON value per kind (mirrors the contract mint prices) — used for value labels
+const KIND_VALUE = [0.01, 0.02, 0.03, 0.04, 0.05];
 
 function makeGemTints() {
   const img = SHEETS.dungeon;
@@ -262,6 +285,7 @@ function buildWorld() {
   GROWS = Math.ceil(world.h / TILE);
   ground = new Array(GCOLS * GROWS);
   dungeonMask = new Array(GCOLS * GROWS).fill(false);
+  colliders.length = 0;
 
   // dungeon region (top-right cave)
   const dx0 = GCOLS - 15, dx1 = GCOLS - 3, dy0 = 2, dy1 = 11;
@@ -282,9 +306,15 @@ function buildWorld() {
       if (inDungeon) {
         dungeonMask[i] = true;
         const wall = c === dx0 || c === dx1 || r === dy0 || r === dy1;
-        ground[i] = wall
-          ? { sheet: "dungeon", idx: rnd() < 0.5 ? T.dWall : T.dWallA }
-          : { sheet: "dungeon", idx: rnd() < 0.4 ? T.dFloorA : rnd() < 0.5 ? T.dFloorB : T.dFloor };
+        if (wall) {
+          // leave a doorway on the left wall so players can enter the dungeon
+          const doorway = c === dx0 && r === ((dy0 + dy1) >> 1);
+          ground[i] = { sheet: "dungeon", idx: rnd() < 0.5 ? T.dWall : T.dWallA };
+          if (!doorway) colliders.push({ l: c * TILE + 2, t: r * TILE + 2, r: c * TILE + TILE - 2, b: r * TILE + TILE - 2 });
+          if (doorway) ground[i] = { sheet: "dungeon", idx: T.dFloor };
+        } else {
+          ground[i] = { sheet: "dungeon", idx: rnd() < 0.4 ? T.dFloorA : rnd() < 0.5 ? T.dFloorB : T.dFloor };
+        }
         continue;
       }
       let plot = null;
@@ -310,44 +340,55 @@ function buildWorld() {
     if (dungeonMask[i]) return false;
     return ground[i].sheet === "town" && ground[i].idx <= T.grassB;
   };
-  const place = (sheet, idx, c, r, size) =>
-    decor.push({ wx: c * TILE + (TILE - size) / 2, wy: r * TILE + (TILE - size) - 6, sheet, idx, size, ay: r * TILE + TILE });
+  const place = (sheet, idx, c, r, size, solid) => {
+    const o = { wx: c * TILE + (TILE - size) / 2, wy: r * TILE + (TILE - size) - 6, sheet, idx, size, ay: r * TILE + TILE };
+    decor.push(o);
+    if (solid) {
+      // a footprint box at the base of the sprite, so the player collides with
+      // the trunk/fence/prop rather than the whole (often mostly-empty) tile
+      const bw = size * (solid === "fence" ? 0.94 : solid === "tree" ? 0.34 : 0.52);
+      const bh = size * (solid === "fence" ? 0.44 : 0.26);
+      const cxp = o.wx + size / 2, byp = o.wy + size - 5;
+      colliders.push({ l: cxp - bw / 2, t: byp - bh, r: cxp + bw / 2, b: byp });
+    }
+    return o;
+  };
 
-  // trees
+  // trees (solid)
   for (let n = 0; n < 40; n++) {
     const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
     if (!cellFree(c, r)) continue;
     const k = rnd();
-    place("town", k < 0.5 ? T.treeGreen : k < 0.8 ? T.treeRound : T.treeAutumn, c, r, 64);
+    place("town", k < 0.5 ? T.treeGreen : k < 0.8 ? T.treeRound : T.treeAutumn, c, r, 64, "tree");
   }
-  // bushes / berries
+  // bushes / berries (passable — soft scenery)
   for (let n = 0; n < 46; n++) {
     const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
     if (!cellFree(c, r)) continue;
     place("town", rnd() < 0.35 ? T.berry : T.bush, c, r, 40);
   }
-  // crops on the soil plots + fences around them
+  // crops on the soil plots (passable) + fences around them (solid)
   for (const P of plots) {
     for (let r = P.py; r < P.py + P.ph; r++) for (let c = P.px; c < P.px + P.pw; c++) {
       if (rnd() < 0.55) place("farm", T.crops[(rnd() * T.crops.length) | 0], c, r, 34);
     }
     for (let c = P.px - 1; c <= P.px + P.pw; c++) {
-      place("town", T.fenceH, c, P.py - 1, 40);
-      place("town", T.fenceH, c, P.py + P.ph, 40);
+      place("town", T.fenceH, c, P.py - 1, 40, "fence");
+      place("town", T.fenceH, c, P.py + P.ph, 40, "fence");
     }
   }
-  // farm animals wandering the meadow
+  // farm animals wandering the meadow (passable)
   for (let n = 0; n < 7; n++) {
     const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
     if (!cellFree(c, r)) continue;
-    const d = place("farm", T.animals[(rnd() * T.animals.length) | 0], c, r, 32);
+    place("farm", T.animals[(rnd() * T.animals.length) | 0], c, r, 32);
     const o = decor[decor.length - 1];
     o.animal = true; o.bx = o.wx; o.by = o.wy; o.ph = rnd() * 6.28;
   }
-  // dungeon loot: chests + barrels
+  // dungeon loot: chests + barrels (solid props)
   for (let n = 0; n < 5; n++) {
     const c = dx0 + 1 + ((rnd() * (dx1 - dx0 - 1)) | 0), r = dy0 + 1 + ((rnd() * (dy1 - dy0 - 1)) | 0);
-    place("dungeon", rnd() < 0.5 ? T.chest : T.barrel, c, r, 34);
+    place("dungeon", rnd() < 0.5 ? T.chest : T.barrel, c, r, 34, "prop");
   }
   decor.sort((a, b) => a.ay - b.ay);
 
@@ -433,7 +474,7 @@ function handleMsg(m) {
       crystals.delete(m.crystalId);
       satchel[m.kind]++;
       renderSatchel();
-      toast(`You gathered a ${KIND.names[m.kind]} ✦`);
+      toast(`You gathered a ${KIND.names[m.kind]} ✦ · worth ${KIND_VALUE[m.kind]} MON to mint`);
       chime(520 + m.kind * 60);
       break;
     case "chat":
@@ -468,6 +509,17 @@ function loop(now) {
   }
 }
 
+// player's feet vs solid boxes (with a small radius so the body doesn't clip in)
+const FEET_Y = 15, FEET_R = 9;
+function blocked(x, y) {
+  const fx = x, fy = y + FEET_Y;
+  for (let i = 0; i < colliders.length; i++) {
+    const c = colliders[i];
+    if (fx > c.l - FEET_R && fx < c.r + FEET_R && fy > c.t - FEET_R && fy < c.b + FEET_R) return true;
+  }
+  return false;
+}
+
 function update(dt, now) {
   if (me) {
     let dx = 0, dy = 0;
@@ -480,8 +532,11 @@ function update(dt, now) {
     if (meMoving) {
       const l = Math.hypot(dx, dy);
       const sp = 235 * dt;
-      me.x = Math.max(0, Math.min(world.w, me.x + (dx / l) * sp));
-      me.y = Math.max(0, Math.min(world.h, me.y + (dy / l) * sp));
+      const nx = Math.max(0, Math.min(world.w, me.x + (dx / l) * sp));
+      const ny = Math.max(0, Math.min(world.h, me.y + (dy / l) * sp));
+      // resolve each axis separately so we slide along obstacles instead of sticking
+      if (!blocked(nx, me.y)) me.x = nx;
+      if (!blocked(me.x, ny)) me.y = ny;
       me.facing = Math.atan2(dy, dx);
       if (now - lastMove > 65 && ws && ws.readyState === 1) {
         lastMove = now;
@@ -619,10 +674,13 @@ function drawCrystal(c, now) {
     ctx.setLineDash([5, 5]);
     ctx.beginPath(); ctx.arc(c.x, y, 24, 0, 6.28); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(70,80,99,0.85)";
-    ctx.font = "600 12px Segoe UI";
     ctx.textAlign = "center";
-    ctx.fillText("Space to gather", c.x, y - 30);
+    ctx.fillStyle = KIND.colors[c.kind];
+    ctx.font = "700 13px Segoe UI";
+    ctx.fillText(`${KIND.names[c.kind]} · ${KIND_VALUE[c.kind]} MON`, c.x, y - 34);
+    ctx.fillStyle = "rgba(70,80,99,0.8)";
+    ctx.font = "600 11px Segoe UI";
+    ctx.fillText("Space to gather", c.x, y - 20);
   }
 }
 
@@ -686,18 +744,26 @@ function burstConfetti(id, kind) {
 function renderSatchel() {
   const grid = $("satchelGrid");
   grid.innerHTML = "";
-  let any = false;
+  let any = false, total = 0;
   for (let k = 0; k < KIND_COUNT; k++) {
     const n = satchel[k];
-    if (n > 0) any = true;
+    if (n > 0) { any = true; total += n * KIND_VALUE[k]; }
     const slot = document.createElement("div");
     slot.className = "satchel-slot" + (n > 0 ? "" : " empty");
-    slot.innerHTML = gemSVG(k, 30) + (n > 0 ? `<span class="count">${n}</span>` : "");
-    slot.title = n > 0 ? `Mint a ${KIND.names[k]} on Monad` : KIND.names[k];
+    slot.innerHTML = gemSVG(k, 28) + (n > 0 ? `<span class="count">${n}</span>` : "") +
+      `<span class="val">${KIND_VALUE[k]}</span>`;
+    slot.title = n > 0 ? `Mint ${KIND.names[k]} · ${KIND_VALUE[k]} MON` : `${KIND.names[k]} · ${KIND_VALUE[k]} MON`;
     if (n > 0) slot.onclick = () => openMintModal(k);
     grid.appendChild(slot);
   }
-  $("satchelEmpty").style.display = any ? "none" : "block";
+  const empty = $("satchelEmpty");
+  if (any) {
+    empty.style.display = "block";
+    empty.innerHTML = `Satchel value ≈ <b>${total.toFixed(2)} MON</b>. Tap a crystal to mint it onchain (micro-tx), then list it in the market to sell (macro-tx).`;
+  } else {
+    empty.style.display = "block";
+    empty.innerHTML = `Walk up to a crystal and press <kbd>Space</kbd> to gather. Each kind is worth 0.01–0.05 MON.`;
+  }
 }
 
 // ------------------------------------------------------------------ mint / market modals
@@ -986,7 +1052,7 @@ $("audioBtn").onclick = () => {
 // ------------------------------------------------------------------ wallet events
 if (hasWallet()) {
   window.ethereum.on && window.ethereum.on("accountsChanged", (a) => {
-    if (a.length === 0) { wallet.connected = false; wallet.addr = null; updateWalletUI(); }
+    if (a.length === 0) { wallet.connected = false; wallet.addr = null; try { localStorage.removeItem("mm_wallet"); } catch {} updateWalletUI(); }
     else { wallet.addr = a[0]; updateWalletUI(); refreshBalance(); refreshMarket(); }
   });
   window.ethereum.on && window.ethereum.on("chainChanged", () => location.reload());
@@ -1006,6 +1072,7 @@ async function boot() {
   renderSatchel();
   connectWS();
   refreshMarket();
+  tryReconnectWallet();
   requestAnimationFrame(loop);
 }
 boot();
