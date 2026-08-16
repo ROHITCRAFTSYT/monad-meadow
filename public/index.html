@@ -85,6 +85,16 @@
       <button id="audioBtn" class="mini" title="Ambient sound">♪ off</button>
     </div>
 
+    <!-- Mobile touch controls (shown on small screens) -->
+    <div class="hud touch-move" id="touchPad"><div class="stick" id="stick"></div></div>
+    <button class="hud touch-gather" id="touchGather" title="Gather">✦</button>
+    <nav class="hud mobile-bar" id="mobileBar">
+      <button data-panel="roomCard" title="Room & invite">🧭<span>Room</span></button>
+      <button data-panel="satchel" title="Satchel">🎒<span>Satchel</span></button>
+      <button data-panel="market" title="Market">🛒<span>Market</span></button>
+      <button data-panel="chat" title="Chat">💬<span>Chat</span></button>
+    </nav>
+
     <!-- Toast -->
     <div id="toast" class="toast hidden"></div>
 

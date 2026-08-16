@@ -220,10 +220,65 @@ kbd {
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 .modal-actions .btn { flex: 1; }
 
-@media (max-width: 720px) {
-  .right, .bottom-right { width: 200px; }
-  .bottom-left { width: 180px; }
-  .satchel-grid { grid-template-columns: repeat(5, 1fr); }
-  .controls { display: none; }
+/* Mobile controls: hidden on desktop, shown < 760px */
+.mobile-bar, .touch-move, .touch-gather { display: none; }
+
+@media (max-width: 760px) {
+  /* compact header */
+  .top { padding: 8px 12px; background: linear-gradient(to bottom, rgba(255,255,255,0.8), rgba(255,255,255,0)); }
   .title { font-size: 17px; }
+  .sub { font-size: 10px; }
+  .netpill { display: none; }
+  .btn.primary { padding: 8px 13px; font-size: 13px; border-radius: 10px; }
+  .controls { display: none; }
+  .acct { font-size: 11px; padding: 5px 9px; }
+
+  /* every HUD panel becomes a bottom sheet, hidden until opened via the bar */
+  .room-card, .right, .bottom-left, .bottom-right {
+    position: fixed; left: 8px; right: 8px; bottom: 74px; top: auto;
+    width: auto; max-height: 56vh; z-index: 30;
+    display: none; flex-direction: column;
+  }
+  .room-card.sheet-open, .right.sheet-open, .bottom-left.sheet-open, .bottom-right.sheet-open {
+    display: flex; animation: sheet .18s ease;
+  }
+  @keyframes sheet { from { transform: translateY(18px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .qr { width: 96px; height: 96px; }
+  .room-code { font-size: 26px; }
+  .satchel-grid { grid-template-columns: repeat(5, 1fr); }
+  .chat-log { height: 30vh; }
+
+  /* bottom navigation bar */
+  .mobile-bar {
+    display: flex; left: 0; right: 0; bottom: 0; z-index: 36;
+    justify-content: space-around; align-items: center;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--panel-line);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .mobile-bar button {
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    font-size: 20px; background: none; border: none; border-radius: 12px;
+    padding: 5px 14px; cursor: pointer; color: var(--ink-soft);
+  }
+  .mobile-bar button span { font-size: 9px; font-weight: 600; }
+  .mobile-bar button.active { background: rgba(107,191,168,0.18); color: var(--accent-deep); }
+
+  /* virtual joystick + gather button */
+  .touch-move {
+    display: block; left: 18px; bottom: 92px; width: 118px; height: 118px;
+    border-radius: 50%; background: rgba(255,255,255,0.26);
+    border: 1px solid var(--panel-line); z-index: 32; touch-action: none;
+  }
+  .touch-move .stick {
+    position: absolute; left: 37px; top: 37px; width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(107,191,168,0.8); box-shadow: var(--shadow);
+  }
+  .touch-gather {
+    display: flex; right: 18px; bottom: 104px; width: 74px; height: 74px; border-radius: 50%;
+    align-items: center; justify-content: center; font-size: 26px; color: #fff;
+    background: var(--accent); border: none; box-shadow: 0 8px 24px rgba(75,157,134,0.45);
+    z-index: 32; touch-action: none;
+  }
+  body.sheet-active .touch-move, body.sheet-active .touch-gather { opacity: 0.12; pointer-events: none; }
 }

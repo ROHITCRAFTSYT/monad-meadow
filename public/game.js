@@ -210,6 +210,7 @@ const bubbles = new Map(); // id -> {text, t}
 const confetti = [];
 let nearestCrystal = null;
 let meMoving = false, meDir = 1;
+const touchVec = { x: 0, y: 0 }; // from the on-screen joystick (mobile)
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
@@ -550,10 +551,12 @@ function update(dt, now) {
     if (keys["s"] || keys["arrowdown"]) dy += 1;
     if (keys["a"] || keys["arrowleft"]) dx -= 1;
     if (keys["d"] || keys["arrowright"]) dx += 1;
-    meMoving = !!(dx || dy);
-    if (dx < 0) meDir = -1; else if (dx > 0) meDir = 1;
+    dx += touchVec.x; dy += touchVec.y; // joystick
+    const mag = Math.hypot(dx, dy);
+    meMoving = mag > 0.15;
+    if (dx < -0.05) meDir = -1; else if (dx > 0.05) meDir = 1;
     if (meMoving) {
-      const l = Math.hypot(dx, dy);
+      const l = mag;
       const sp = 235 * dt;
       const nx = Math.max(0, Math.min(world.w, me.x + (dx / l) * sp));
       const ny = Math.max(0, Math.min(world.h, me.y + (dy / l) * sp));
@@ -1127,6 +1130,63 @@ function setupRoomUI() {
   nm.addEventListener("keydown", (e) => { if (e.key === "Enter") { applyName(); nm.blur(); } });
 }
 
+// ------------------------------------------------------------------ mobile: sheets + joystick
+function setupMobileControls() {
+  const bar = $("mobileBar");
+  const ids = ["roomCard", "satchel", "market", "chat"];
+  let openId = null;
+  function closeAll() {
+    ids.forEach((id) => $(id).classList.remove("sheet-open"));
+    bar.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    document.body.classList.remove("sheet-active");
+    openId = null;
+  }
+  function open(id, btn) {
+    closeAll();
+    $(id).classList.add("sheet-open");
+    if (btn) btn.classList.add("active");
+    document.body.classList.add("sheet-active");
+    openId = id;
+  }
+  bar.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const id = btn.dataset.panel;
+    if (openId === id) closeAll(); else open(id, btn);
+  });
+  // tapping the world dismisses any open sheet
+  canvas.addEventListener("pointerdown", () => { if (openId) closeAll(); });
+
+  // virtual joystick (pointer events cover both touch and mouse)
+  const pad = $("touchPad"), stick = $("stick"), MAX = 44;
+  let active = false, cx = 0, cy = 0;
+  function jMove(e) {
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const d = Math.hypot(dx, dy);
+    if (d > MAX) { dx = dx / d * MAX; dy = dy / d * MAX; }
+    stick.style.transform = `translate(${dx}px,${dy}px)`;
+    touchVec.x = dx / MAX; touchVec.y = dy / MAX;
+  }
+  function jEnd() { active = false; touchVec.x = 0; touchVec.y = 0; stick.style.transform = ""; }
+  pad.addEventListener("pointerdown", (e) => {
+    active = true;
+    try { pad.setPointerCapture(e.pointerId); } catch {}
+    const r = pad.getBoundingClientRect();
+    cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+    jMove(e); e.preventDefault();
+  });
+  pad.addEventListener("pointermove", (e) => { if (active) { jMove(e); e.preventDefault(); } });
+  pad.addEventListener("pointerup", jEnd);
+  pad.addEventListener("pointercancel", jEnd);
+
+  $("touchGather").addEventListener("click", (e) => { e.preventDefault(); tryGather(); });
+
+  // on a phone, open the room sheet first so inviting is obvious
+  if (matchMedia("(max-width: 760px)").matches) {
+    open("roomCard", bar.querySelector('[data-panel="roomCard"]'));
+  }
+}
+
 // ------------------------------------------------------------------ boot
 async function boot() {
   try {
@@ -1138,6 +1198,7 @@ async function boot() {
   makeGemTints();
   buildWorld();
   setupRoomUI();
+  setupMobileControls();
   renderSatchel();
   connectWS();
   refreshMarket();
