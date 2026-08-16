@@ -6,7 +6,7 @@ contracts/dependencies/
 # foundry build + SENSITIVE (cache stores deploy private keys)
 contracts/out/
 contracts/cache/
-contracts/broadcast/**/dry-run/
+contracts/broadcast/
 
 # cloudflare
 .wrangler/
@@ -19,3 +19,8 @@ assets_src/
 *.log
 .DS_Store
 Thumbs.db
+
+# environment variables (NEVER commit secrets!)
+.env
+.env.local
+.env.*.local
