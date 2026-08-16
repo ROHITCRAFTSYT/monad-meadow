@@ -22,7 +22,7 @@ const SEL = {
   kindOf: "0x2345e28c", // kindOf(uint256)
   nextTokenId: "0x75794a3c", // nextTokenId()
 };
-const CHAIN_HEX = "0x279f"; // 10143
+let CHAIN_HEX = "0x279f"; // 10143 by default; set from CFG.chainId at boot
 
 let CFG = null; // {contractAddress, rpc, chainId, explorer}
 
@@ -140,7 +140,7 @@ async function ensureChain() {
         method: "wallet_addEthereumChain",
         params: [{
           chainId: CHAIN_HEX,
-          chainName: "Monad Testnet",
+          chainName: CFG.name || "Monad",
           nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
           rpcUrls: [CFG.rpc],
           blockExplorerUrls: [CFG.explorer],
@@ -1291,8 +1291,10 @@ async function boot() {
   try {
     CFG = await (await fetch("/api/config")).json();
   } catch {
-    CFG = { contractAddress: "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com" };
+    CFG = { contractAddress: "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com", name: "Monad Testnet" };
   }
+  CHAIN_HEX = "0x" + Number(CFG.chainId).toString(16);
+  if (CFG.name) $("netpill").textContent = CFG.name;
   await loadSheets();
   makeGemTints();
   buildWorld();

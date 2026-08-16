@@ -16,6 +16,11 @@ export interface Env {
   WORLD_ROOM: DurableObjectNamespace;
   ASSETS: Fetcher;
   CONTRACT_ADDRESS: string;
+  // optional overrides — set these to switch the app to Monad mainnet
+  CHAIN_ID?: string;
+  RPC_URL?: string;
+  EXPLORER?: string;
+  NETWORK_NAME?: string;
 }
 
 const WORLD_W = 2400;
@@ -47,9 +52,10 @@ export default {
     if (url.pathname === "/api/config") {
       return Response.json({
         contractAddress: env.CONTRACT_ADDRESS,
-        chainId: 10143,
-        rpc: "https://testnet-rpc.monad.xyz",
-        explorer: "https://testnet.monadscan.com",
+        chainId: env.CHAIN_ID ? Number(env.CHAIN_ID) : 10143,
+        rpc: env.RPC_URL || "https://testnet-rpc.monad.xyz",
+        explorer: env.EXPLORER || "https://testnet.monadscan.com",
+        name: env.NETWORK_NAME || "Monad Testnet",
       });
     }
 
