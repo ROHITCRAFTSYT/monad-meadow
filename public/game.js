@@ -99,10 +99,15 @@ async function waitForReceipt(hash, tries = 40) {
   for (let i = 0; i < tries; i++) {
     try {
       const r = await rpc("eth_getTransactionReceipt", [hash]);
-      if (r && r.blockNumber) return r;
+      if (r && r.blockNumber) {
+        setTxProcessStage(4, "Transaction confirmed. The receipt landed and the wallet balance has been refreshed.");
+        updateMarketProcessUI();
+        return r;
+      }
     } catch {}
     await new Promise((res) => setTimeout(res, 700));
   }
+  setTxProcessStage(4, "Transaction submitted. Keep an eye on the wallet while the Monad network confirms it.");
   return null;
 }
 
@@ -207,6 +212,7 @@ async function sendTx({ data, value }) {
   await ensureChain();
   const tx = { from: wallet.addr, to: CFG.contractAddress, data };
   if (value !== undefined) tx.value = toHexWei(value);
+  setTxProcessStage(4, "Signature sent. Confirming transaction on Monad and waiting for receipt.");
   return window.ethereum.request({ method: "eth_sendTransaction", params: [tx] });
 }
 function updateWalletUI() {
@@ -218,9 +224,55 @@ function updateWalletUI() {
     $("connectBtn").classList.remove("hidden");
     $("acct").classList.add("hidden");
   }
+  updateMarketProcessUI();
 }
 function explorerTx(h) {
   return `${CFG.explorer}/tx/${h}`;
+}
+
+function updateMarketProcessUI() {
+  const steps = [...document.querySelectorAll(".process-step")];
+  const live = $("txLive");
+  if (!steps.length || !live) return;
+
+  let stage = 0;
+  let text = "No wallet connected yet. Connect MetaMask to begin the onchain flow.";
+
+  if (wallet.connected) {
+    stage = 1;
+    text = "Wallet connected. Gather a crystal, then mint it on Monad to bring it onchain.";
+    if (satchel.some((n) => n > 0)) {
+      stage = 2;
+      text = "Crystal ready in your satchel. Mint it onchain to create a collectible item.";
+    }
+    if (wallet.addr && document.querySelectorAll("#mineList .card").length > 0) {
+      stage = 3;
+      text = "Your crystal is owned onchain. List it in the Meadow Market to sell for MON.";
+    }
+    const hasListing = document.querySelectorAll("#marketList .card").length > 0;
+    if (hasListing || (wallet.addr && document.querySelectorAll("#mineList .card").length > 0)) {
+      stage = 4;
+      text = "Market is live. Buy, sell, or confirm a pending transaction and watch the wallet update.";
+    }
+  }
+
+  steps.forEach((el, index) => {
+    el.classList.toggle("is-active", index === stage);
+    el.classList.toggle("is-done", index < stage);
+  });
+
+  live.textContent = text;
+}
+
+function setTxProcessStage(stage, text) {
+  const steps = [...document.querySelectorAll(".process-step")];
+  const live = $("txLive");
+  if (!steps.length || !live) return;
+  steps.forEach((el, index) => {
+    el.classList.toggle("is-active", index === stage);
+    el.classList.toggle("is-done", index < stage);
+  });
+  live.textContent = text;
 }
 
 // ------------------------------------------------------------------ game state
@@ -475,6 +527,44 @@ function buildWorld() {
     if (isGrass(c, r) && !inR(c, r, forest)) place("town", rnd() < 0.5 ? T.flower : T.bush, c, r, 30);
   }
 
+  // --- clear landmarks so the world feels alive ---------------------------
+  // central plaza buildings / market stalls
+  for (let i = -2; i <= 2; i++) {
+    place("town", T.stone, midC + i, midR - 5, 74, "prop");
+    place("town", T.stone, midC + i, midR + 5, 74, "prop");
+  }
+  for (let i = 0; i < 5; i++) {
+    place("town", T.flower, midC - 4 + i, midR - 1, 28);
+    place("town", T.flower, midC - 4 + i, midR + 1, 28);
+  }
+
+  // farm structures and sheds
+  for (let i = 0; i < 3; i++) {
+    place("farm", T.barrel, farm.c0 + 2 + i * 4, farm.r0 - 1, 30, "prop");
+    place("farm", T.barrel, farm.c0 + 2 + i * 4, farm.r1 + 1, 30, "prop");
+  }
+
+  // dramatic dungeon gate and interior props so it reads as a real dungeon
+  for (let i = 0; i < 5; i++) {
+    place("dungeon", T.dWall, dungeon.c0 + i, dungeon.r0 - 1, 52, "prop");
+    place("dungeon", T.dWall, dungeon.c0 + i, dungeon.r1 + 1, 52, "prop");
+  }
+  // Stone pillars and a flaming gate frame to make the entrance unmistakable
+  for (let i = 0; i < 3; i++) {
+    place("dungeon", T.dWallA, dungeon.c0 + 2 + i * 2, dungeon.r0 + 1, 64, "prop");
+    place("dungeon", T.dWallA, dungeon.c0 + 2 + i * 2, dungeon.r1 - 1, 64, "prop");
+  }
+  place("dungeon", T.chest, dungeon.c0 + 2, dungeon.r0 + 2, 34, "prop");
+  place("dungeon", T.barrel, dungeon.c0 + 5, dungeon.r0 + 5, 34, "prop");
+  place("dungeon", T.barrel, dungeon.c0 + 3, dungeon.r1 - 1, 34, "prop");
+
+  // create a visible fiery arena in the dungeon center
+  for (let i = 0; i < 10; i++) {
+    const px = dungeon.c0 + 2 + ((i * 1.2) | 0);
+    const py = dungeon.r0 + 3 + (i % 3);
+    place("dungeon", T.dFloorA, px, py, 28, "prop");
+  }
+
   // --- dungeon loot -------------------------------------------------------
   for (let n = 0; n < 5; n++) {
     const c = dungeon.c0 + 1 + ((rnd() * (dungeon.c1 - dungeon.c0 - 1)) | 0), r = dungeon.r0 + 1 + ((rnd() * (dungeon.r1 - dungeon.r0 - 1)) | 0);
@@ -489,8 +579,8 @@ function buildWorld() {
     y1: dungeon.r1 * TILE + TILE
   };
   dragon = {
-    x: (dungeon.c0 + dungeon.c1) * TILE / 2,
-    y: (dungeon.r0 + dungeon.r1) * TILE / 2,
+    x: dungeon.c0 * TILE + TILE * 1.75,
+    y: dungeon.r0 * TILE + TILE * 2.1,
     health: DRAGON_HEALTH,
     maxHealth: DRAGON_HEALTH,
     lastAttack: 0,
@@ -520,12 +610,12 @@ $("chatInput").addEventListener("blur", () => (typing = false));
 
 // Click/tap for dragon attacks
 addEventListener("click", () => {
-  if (me && dragon && !dragonDefeated && playerHealth > 0) {
-    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
-                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
-    if (inDungeon) {
-      keys["click"] = true;
-    }
+  if (!me || !dragon || dragonDefeated || playerHealth <= 0) return;
+  const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
+                   me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+  const nearDragon = Math.hypot(me.x - dragon.x, me.y - dragon.y) < 180;
+  if (inDungeon && nearDragon) {
+    keys["click"] = true;
   }
 });
 
@@ -686,10 +776,11 @@ function update(dt, now) {
   if (me && dragon && !dragonDefeated) {
     const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
                      me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
-    
-    if (inDungeon) {
-      // Player takes damage from being in dungeon with dragon
-      if (now - dragon.lastAttack > 1000) {
+    const nearDragon = Math.hypot(me.x - dragon.x, me.y - dragon.y) < 180;
+
+    if (inDungeon && nearDragon) {
+      // Dragon only attacks once the player is inside the dungeon and close enough
+      if (now - dragon.lastAttack > 1200) {
         playerHealth -= 5;
         dragon.lastAttack = now;
         toast("🐉 Dragon attacks! -5 HP");
@@ -697,16 +788,22 @@ function update(dt, now) {
           handlePlayerDeath();
         }
       }
-      
-      // Check if player is attacking dragon (clicked/tapped)
+
+      // Player attacks the dragon only when in melee range and actively clicking
       if (keys["click"]) {
         dragon.health -= 3;
         keys["click"] = false;
         toast("⚔️ Hit! Dragon -3 HP");
-        
+
         if (dragon.health <= 0) {
           handleDragonDefeat();
         }
+      }
+    } else if (inDungeon && !nearDragon) {
+      // if the player is in the dungeon but not yet near the dragon, give them a clear hint
+      if (now - dragon.lastAttack > 3000) {
+        toast("🐉 The dragon roars from deep in the dungeon...", 1800);
+        dragon.lastAttack = now;
       }
     }
   }
@@ -918,106 +1015,109 @@ function drawCrystal(c, now) {
 function drawDragon(d, now) {
   const pulse = 0.5 + 0.5 * Math.sin(now / 400) * d.health / d.maxHealth;
   const isAlive = d.health > 0;
-  
-  // Dragon glow aura (red/dark red)
-  const rg = ctx.createRadialGradient(d.x, d.y, 5, d.x, d.y, 80);
-  rg.addColorStop(0, "#cc2200aa");
-  rg.addColorStop(1, "#660000" + (isAlive ? "44" : "00"));
+
+  // stronger red beacon so the dragon is always visible from afar
+  const rg = ctx.createRadialGradient(d.x, d.y, 5, d.x, d.y, 120);
+  rg.addColorStop(0, isAlive ? "rgba(255,60,20,0.7)" : "rgba(120,255,120,0.25)");
+  rg.addColorStop(0.35, "rgba(200,30,0,0.45)");
+  rg.addColorStop(1, "rgba(60,0,0,0)");
   ctx.fillStyle = rg;
-  ctx.beginPath(); ctx.arc(d.x, d.y, 80, 0, 6.28); ctx.fill();
-  
-  // Dragon body (large red shape)
+  ctx.beginPath(); ctx.arc(d.x, d.y, 120, 0, 6.28); ctx.fill();
+
+  // fiery arena glow under the dragon
+  ctx.fillStyle = isAlive ? "rgba(255,120,30,0.35)" : "rgba(120,255,120,0.20)";
+  ctx.beginPath(); ctx.ellipse(d.x, d.y + 20, 86, 34, 0, 0, 6.28); ctx.fill();
+
   ctx.save();
   ctx.translate(d.x, d.y);
-  ctx.scale(isAlive ? 1 : 0.5, isAlive ? 1 : 0.5);
-  
-  // Body
-  ctx.fillStyle = "#cc2200";
+  ctx.scale(isAlive ? 1.15 : 0.55, isAlive ? 1.15 : 0.55);
+
+  // wings
+  ctx.fillStyle = "rgba(130, 0, 0, 0.78)";
   ctx.beginPath();
-  ctx.ellipse(0, 0, 28, 22, 0, 0, 6.28);
-  ctx.fill();
-  
-  // Head
+  ctx.moveTo(-8, -4); ctx.quadraticCurveTo(-50, -42, -74, -12); ctx.quadraticCurveTo(-26, 16, -8, 2);
+  ctx.closePath(); ctx.fill();
   ctx.beginPath();
-  ctx.arc(35, -8, 18, 0, 6.28);
-  ctx.fill();
-  
-  // Tail
+  ctx.moveTo(-8, -4); ctx.quadraticCurveTo(50, -42, 78, -12); ctx.quadraticCurveTo(26, 16, -8, 2);
+  ctx.closePath(); ctx.fill();
+
+  // tail
+  ctx.strokeStyle = "#8a0000";
+  ctx.lineWidth = 14;
   ctx.beginPath();
-  ctx.moveTo(-25, 0);
-  ctx.quadraticCurveTo(-50, -15, -55, -35);
-  ctx.strokeStyle = "#cc2200";
-  ctx.lineWidth = 12;
+  ctx.moveTo(-34, 2); ctx.quadraticCurveTo(-60, -6, -88, -22);
   ctx.stroke();
-  
-  // Eyes
-  ctx.fillStyle = "#ffff00";
-  ctx.beginPath(); ctx.arc(40, -12, 6, 0, 6.28); ctx.fill();
-  ctx.fillStyle = "#000";
-  ctx.beginPath(); ctx.arc(42, -12, 3, 0, 6.28); ctx.fill();
-  
-  // Mouth (menacing)
-  ctx.strokeStyle = "#990000";
+
+  // body
+  ctx.fillStyle = "#c51d00";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 42, 28, 0, 0, 6.28);
+  ctx.fill();
+
+  // chest and belly
+  ctx.fillStyle = "#ec5332";
+  ctx.beginPath();
+  ctx.ellipse(8, 6, 18, 14, 0, 0, 6.28); ctx.fill();
+
+  // head
+  ctx.fillStyle = "#d62400";
+  ctx.beginPath();
+  ctx.arc(50, -12, 20, 0, 6.28); ctx.fill();
+
+  // horns
+  ctx.fillStyle = "#f5d763";
+  ctx.beginPath(); ctx.moveTo(42, -30); ctx.lineTo(48, -48); ctx.lineTo(56, -30); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(58, -28); ctx.lineTo(66, -46); ctx.lineTo(72, -28); ctx.closePath(); ctx.fill();
+
+  // eyes
+  ctx.fillStyle = "#ffd800";
+  ctx.beginPath(); ctx.arc(56, -16, 5, 0, 6.28); ctx.fill();
+  ctx.fillStyle = "#111";
+  ctx.beginPath(); ctx.arc(58, -15, 2.5, 0, 6.28); ctx.fill();
+
+  // mouth & claws
+  ctx.strokeStyle = "#7a0000";
   ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(50, -5, 8, 3.5, 6.1);
+  ctx.beginPath(); ctx.arc(68, -4, 9, 2.4, 5.8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(14, 16); ctx.lineTo(18, 26); ctx.moveTo(6, 16); ctx.lineTo(10, 26);
   ctx.stroke();
-  
-  // Spikes on back
-  for (let i = -2; i <= 2; i++) {
-    ctx.fillStyle = "#990000";
+
+  // spikes
+  ctx.fillStyle = "#8d0000";
+  for (let i = -3; i <= 3; i++) {
+    const x = i * 10;
     ctx.beginPath();
-    ctx.moveTo(i * 12, -20);
-    ctx.lineTo(i * 12 - 4, -35);
-    ctx.lineTo(i * 12 + 4, -35);
-    ctx.closePath();
+    ctx.moveTo(x, -24); ctx.lineTo(x - 5, -40); ctx.lineTo(x + 5, -40); ctx.closePath();
     ctx.fill();
   }
-  
-  // Wings (folded)
-  ctx.fillStyle = "rgba(102, 0, 0, 0.6)";
-  ctx.beginPath();
-  ctx.moveTo(0, -10);
-  ctx.lineTo(-40, -30);
-  ctx.lineTo(-35, 5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(0, -10);
-  ctx.lineTo(40, -30);
-  ctx.lineTo(35, 5);
-  ctx.closePath();
-  ctx.fill();
-  
+
   ctx.restore();
-  
-  // Health bar
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(d.x - 50, d.y - 65, 100, 10);
-  
-  const healthPercent = Math.max(0, d.health / d.maxHealth);
-  const healthColor = healthPercent > 0.5 ? "#ff3300" : healthPercent > 0.25 ? "#ff6600" : "#cc0000";
-  ctx.fillStyle = healthColor;
-  ctx.fillRect(d.x - 50, d.y - 65, 100 * healthPercent, 10);
-  
+
+  // Health bar and boss label
+  const hpX = d.x - 56;
+  const hpY = d.y - 84;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(hpX, hpY, 112, 12);
+  const healthValue = Math.max(0, d.health / d.maxHealth);
+  ctx.fillStyle = healthValue > 0.5 ? "#ff5a23" : healthValue > 0.25 ? "#ff8a1d" : "#d32f2f";
+  ctx.fillRect(hpX, hpY, 112 * healthValue, 12);
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(d.x - 50, d.y - 65, 100, 10);
-  
-  // Health text
+  ctx.strokeRect(hpX, hpY, 112, 12);
+
   ctx.fillStyle = "#fff";
-  ctx.font = "700 12px Segoe UI";
   ctx.textAlign = "center";
-  ctx.fillText(`DRAGON HP: ${Math.max(0, Math.round(d.health))}/${d.maxHealth}`, d.x, d.y - 80);
-  
-  // Instructions
+  ctx.font = "700 12px Segoe UI";
+  ctx.fillText(`DRAGON ${Math.max(0, Math.round(d.health))}/${d.maxHealth}`, d.x, hpY - 9);
+
   if (me && dungeonBounds) {
     const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
                      me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
+    const nearDragon = Math.hypot(me.x - d.x, me.y - d.y) < 180;
     if (inDungeon) {
-      ctx.fillStyle = isAlive ? "rgba(255,100,0,0.9)" : "rgba(100,255,100,0.9)";
-      ctx.font = "600 14px Segoe UI";
-      ctx.fillText(isAlive ? "⚔️ ATTACK! (Click/Tap)" : "🎉 DRAGON DEFEATED!", d.x, d.y + 75);
+      ctx.fillStyle = isAlive ? "rgba(255,100,0,0.96)" : "rgba(100,255,100,0.96)";
+      ctx.font = "700 14px Segoe UI";
+      ctx.fillText(isAlive ? (nearDragon ? "⚔️ ATTACK!" : "🐉 DRAGON NEARBY") : "🎉 DRAGON DEFEATED!", d.x, d.y + 72);
     }
   }
 }
@@ -1102,6 +1202,7 @@ function renderSatchel() {
     empty.style.display = "block";
     empty.innerHTML = `Walk up to a crystal and press <kbd>Space</kbd> to gather. Each kind is worth 0.01–0.05 MON.`;
   }
+  updateMarketProcessUI();
 }
 
 // ------------------------------------------------------------------ mint / market modals
@@ -1121,6 +1222,7 @@ $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) close
 async function claimCrystalReward(kind) {
   if (!wallet.connected) return; // Only claim if wallet is connected
   try {
+    setTxProcessStage(2, "Sending the reward claim to Monad. Check your wallet and sign the transaction.");
     const h = await sendTx({ data: SEL.claimReward + encUint(kind) });
     toastTx(`Earned MON for gathering!`, h);
     waitForReceipt(h).then(() => { refreshBalance(); });
@@ -1193,6 +1295,7 @@ async function openMintModal(kind) {
     async () => {
       $("modalConfirm").disabled = true;
       try {
+        setTxProcessStage(3, "Minting your crystal onchain. This creates the collectible and records it to your wallet.");
         const h = await sendTx({ data: SEL.mintItem + encUint(kind), value: price });
         satchel[kind] = Math.max(0, satchel[kind] - 1);
         renderSatchel();
@@ -1222,6 +1325,7 @@ function openListModal(tokenId, kind) {
       if (price <= 0n) { toast("Enter a price above 0."); return; }
       $("modalConfirm").disabled = true;
       try {
+        setTxProcessStage(4, "Listing this crystal in the Meadow Market. The sale will be escrowed and visible to buyers.");
         const h = await sendTx({ data: SEL.list + encUint(tokenId) + encUint(price) });
         closeModal();
         toastTx(`Listed ${KIND.names[kind]} #${tokenId}`, h);
@@ -1241,6 +1345,7 @@ async function buyToken(tokenId, kind, price) {
     async () => {
       $("modalConfirm").disabled = true;
       try {
+        setTxProcessStage(4, "Buying this crystal. The payment is being sent onchain and the listing will clear after final confirmation.");
         const h = await sendTx({ data: SEL.buy + encUint(tokenId), value: price });
         closeModal();
         toastTx(`Bought ${KIND.names[kind]} #${tokenId} ✦`, h);

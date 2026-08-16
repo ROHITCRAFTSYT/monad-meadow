@@ -155,6 +155,45 @@ kbd {
   border: 1px solid rgba(107,191,168,0.22); text-align: center;
 }
 .market-stats b { color: var(--accent-deep); }
+.market-process {
+  margin-bottom: 10px; padding: 10px 8px 8px; border-radius: 12px;
+  background: rgba(255,255,255,0.42); border: 1px solid var(--panel-line);
+}
+.process-header {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); margin-bottom: 8px;
+}
+.process-steps {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
+}
+.process-step {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  text-align: center; padding: 5px 2px; border-radius: 8px;
+  background: rgba(107,191,168,0.06); border: 1px solid transparent; color: var(--ink-soft);
+  transition: all .15s ease;
+}
+.process-step span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; font-size: 11px; font-weight: 800;
+  border-radius: 50%; background: rgba(70,80,99,0.08); color: var(--ink);
+}
+.process-step small {
+  font-size: 9px; line-height: 1.2; font-weight: 700; transform: scale(0.95);
+}
+.process-step.is-active {
+  background: rgba(107,191,168,0.18); border-color: rgba(75,157,134,0.38); color: var(--accent-deep);
+}
+.process-step.is-done {
+  background: rgba(107,191,168,0.12); border-color: rgba(75,157,134,0.22);
+}
+.process-step.is-active span,
+.process-step.is-done span {
+  background: rgba(107,191,168,0.2); color: var(--accent-deep);
+}
+.tx-live {
+  margin-top: 8px; font-size: 11px; color: var(--ink-soft); line-height: 1.45;
+  padding: 7px 8px; border-radius: 8px; background: rgba(70,80,99,0.05);
+}
 .acct .bal.flash { animation: balflash 1s ease; }
 @keyframes balflash {
   0% { color: var(--accent-deep); }

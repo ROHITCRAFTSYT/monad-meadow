@@ -67,6 +67,19 @@
         <button class="tab" data-tab="mine">My crystals</button>
       </div>
       <div class="market-stats" id="marketStats">Live onchain economy on Monad testnet</div>
+
+      <div class="market-process" id="marketProcess">
+        <div class="process-header">Transaction flow</div>
+        <div class="process-steps">
+          <div class="process-step is-active" data-step="connect"><span>1</span><small>Connect wallet</small></div>
+          <div class="process-step" data-step="gather"><span>2</span><small>Gather crystal</small></div>
+          <div class="process-step" data-step="mint"><span>3</span><small>Mint onchain</small></div>
+          <div class="process-step" data-step="list"><span>4</span><small>List in market</small></div>
+          <div class="process-step" data-step="confirm"><span>5</span><small>Confirm & receive</small></div>
+        </div>
+        <div class="tx-live" id="txLive">No wallet connected yet. Connect MetaMask to begin the onchain flow.</div>
+      </div>
+
       <div class="market-list" id="marketList"></div>
       <div class="market-list hidden" id="mineList"></div>
     </section>
