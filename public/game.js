@@ -747,10 +747,8 @@ function handleMsg(m) {
       crystals.delete(m.crystalId);
       satchel[m.kind]++;
       renderSatchel();
-      toast(`You gathered a ${KIND.names[m.kind]} ✦ · earning ${REWARD_VALUE[m.kind]} MON + mint for ${KIND_VALUE[m.kind]} MON`);
+      toast(`You gathered a ${KIND.names[m.kind]} ✦ · worth ${KIND_VALUE[m.kind]} MON to mint`);
       chime(520 + m.kind * 60);
-      // Automatically claim the reward in MON
-      claimCrystalReward(m.kind);
       break;
     case "chat":
       addChat(m.name, m.text);
@@ -1375,54 +1373,26 @@ async function claimCrystalReward(kind) {
 }
 
 // ------------------------------------------------------------------ dragon combat
-async function handleDragonDefeat() {
+// Reward is a RARE crystal drop (no drainable on-chain payout). The player can
+// then choose to mint it — a normal, safe on-chain transaction they control.
+function handleDragonDefeat() {
+  if (dragonDefeated) return;
   dragonDefeated = true;
-  toast("🐉 DRAGON DEFEATED! 🎉 You earned 10 MON!", 5000);
-  celebrate(0);
-  burstConfetti(me ? me.id : "dragon", 0);
-  
-  // Award 10 MON to player via blockchain
-  if (wallet.connected) {
-    try {
-      const h = await sendTx({ data: SEL.claimDragonBounty });
-      toastTx(`🐉 Dragon Bounty Claimed!`, h);
-      waitForReceipt(h).then(() => { refreshBalance(); });
-    } catch (e) {
-      console.log("Dragon bounty claim error:", e.message);
-      toast("Error claiming dragon bounty: " + e.message);
-    }
-  }
+  const RARE = 4; // Tidecrystal, the most valuable kind
+  satchel[RARE] += 1;
+  renderSatchel();
+  toast("🐉 Dragon defeated! A rare Tidecrystal dropped — mint it in your satchel to keep it onchain.", 6000);
+  celebrate(RARE);
+  burstConfetti(me ? me.id : "dragon", RARE);
 }
 
-async function handlePlayerDeath() {
-  if (!me || !wallet.connected) {
-    playerHealth = PLAYER_MAX_HEALTH;
-    dragon.health = DRAGON_HEALTH;
-    dragonDefeated = false;
-    toast("You died! Health reset.", 3000);
-    return;
-  }
-
-  toast("💀 You died! You lost 5 MON!", 5000);
-  burstConfetti(me.id, 4);
-  
-  // Deduct 5 MON from player via blockchain
-  try {
-    const h = await sendTx({ data: SEL.payDeathPenalty, value: 5n * 10n ** 18n }); // contract requires exactly 5 MON
-    toastTx(`💀 Death Penalty Paid`, h);
-    waitForReceipt(h).then(() => { refreshBalance(); });
-  } catch (e) {
-    console.log("Death penalty error:", e.message);
-    toast("Error paying death penalty: " + e.message);
-  }
-  
-  // Reset player for another attempt
+function handlePlayerDeath() {
+  toast("💀 The dragon scorched you! Respawning…", 3000);
+  if (me) burstConfetti(me.id, 3);
   playerHealth = PLAYER_MAX_HEALTH;
-  dragon.health = DRAGON_HEALTH;
+  if (dragon) dragon.health = DRAGON_HEALTH;
   dragonDefeated = false;
-  me.x = 100;
-  me.y = 100;
-  toast("You respawn at the meadow entrance...", 2000);
+  if (me) { me.x = 100; me.y = 100; }
 }
 
 async function openMintModal(kind) {
