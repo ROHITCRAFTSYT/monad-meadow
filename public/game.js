@@ -13,6 +13,7 @@ const KIND_COUNT = 5;
 // selectors (cast sig) — must match MonadMeadow.sol
 const SEL = {
   mintItem: "0x3565a4ff", // mintItem(uint8)
+  claimReward: "0x0fc14592", // claimReward(uint8)
   list: "0x67d36903", // list(uint256,uint96)
   cancelListing: "0x305a67a8", // cancelListing(uint256)
   buy: "0xd96a094a", // buy(uint256)
@@ -307,6 +308,9 @@ const gemTint = [];    // 5 pre-tinted gem canvases
 // MON value per kind (mirrors the contract mint prices) — used for value labels
 const KIND_VALUE = [0.01, 0.02, 0.03, 0.04, 0.05];
 
+// Reward amounts for gathering each crystal kind (in MON) — matches contract rewardAmount
+const REWARD_VALUE = [0.005, 0.01, 0.015, 0.02, 0.025];
+
 function makeGemTints() {
   const img = SHEETS.dungeon;
   for (let k = 0; k < KIND_COUNT; k++) {
@@ -549,8 +553,10 @@ function handleMsg(m) {
       crystals.delete(m.crystalId);
       satchel[m.kind]++;
       renderSatchel();
-      toast(`You gathered a ${KIND.names[m.kind]} ✦ · worth ${KIND_VALUE[m.kind]} MON to mint`);
+      toast(`You gathered a ${KIND.names[m.kind]} ✦ · earning ${REWARD_VALUE[m.kind]} MON + mint for ${KIND_VALUE[m.kind]} MON`);
       chime(520 + m.kind * 60);
+      // Automatically claim the reward in MON
+      claimCrystalReward(m.kind);
       break;
     case "chat":
       addChat(m.name, m.text);
@@ -901,6 +907,19 @@ function closeModal() {
 }
 $("modalCancel").onclick = closeModal;
 $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
+
+// ------------------------------------------------------------------ claim reward
+async function claimCrystalReward(kind) {
+  if (!wallet.connected) return; // Only claim if wallet is connected
+  try {
+    const h = await sendTx({ data: SEL.claimReward + encUint(kind) });
+    toastTx(`Earned MON for gathering!`, h);
+    waitForReceipt(h).then(() => { refreshBalance(); });
+  } catch (e) {
+    // Silently fail if claim fails (e.g., on cooldown or insufficient funds)
+    console.log("Could not claim reward:", e.message);
+  }
+}
 
 async function openMintModal(kind) {
   if (!wallet.connected) { await connectWallet(); if (!wallet.connected) return; }
