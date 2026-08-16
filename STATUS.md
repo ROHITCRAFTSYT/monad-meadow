@@ -42,7 +42,13 @@ _Last updated during the build session. This is the single source of truth for w
 - **Advance · Virality (100):** ⏳ **YOUR ACTION** — post to X/LinkedIn tagging @monad @monad_dev @geeky_kartikey (copy ready in `SOCIAL.md`), record a 30s+ demo video (shot-list in `SOCIAL.md`), chase 5K/10K views (or 25 waitlist / 10 live users as the fallback).
 - **Bonus (100):** Innovation (onchain multiplayer + NFT marketplace) and revenue (2.5% fee) are built-in. ⏳ optional: mainnet deploy (25), custom domain (15).
 
+## 🆕 Latest in this session
+- **Redesigned world** — no more random scatter. Zoned map: village plaza + fountain at the crossroads, organized farm (crop rows + animal pen), forest grove, 3 ponds, dungeon, all linked by dirt roads. Crystals are now crisp faceted diamonds (fixed a square-artifact from an opaque sprite tile).
+- **Real wallet impact** — the mint/buy txs were always real MON transfers; now the UI proves it: live balance **flashes + shows the MON delta** on a confirmed tx, refreshes are gated on the actual tx receipt (`waitForReceipt`), and the market shows live onchain **minted / listed** counts.
+- **Private rooms + QR** and **mobile UI** (tap-to-open sheets + joystick + gather button) — both live and verified.
+
 ## ⏳ Left to do (mostly your calls)
+0. **MAINNET DEPLOY (not done yet — needs funding).** The faucet is testnet-only, so mainnet needs a wallet with **real MON**. Steps: fund your address, then from `contracts/`: `forge script script/Deploy.s.sol:DeployScript --rpc-url https://rpc.monad.xyz --private-key 0xYOURKEY --broadcast` (chainId 143), verify via the agent API with `chainId:143`, then set `worker/wrangler.jsonc` `CONTRACT_ADDRESS` (and the `/api/config` chainId 143 + rpc `https://rpc.monad.xyz` + explorer) and `npx wrangler deploy`. +25 bonus.
 
 1. **Post on socials + record demo** — `SOCIAL.md` has ready copy and a shot-list. This is the biggest remaining points block (up to 100).
 2. **(Optional) Custom domain** — add one in the Cloudflare dashboard → Workers route → your domain. +15 bonus.
