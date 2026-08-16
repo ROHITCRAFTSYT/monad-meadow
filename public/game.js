@@ -157,11 +157,30 @@ async function ensureChain() {
     } else throw e;
   }
 }
+const isMobile = () => matchMedia("(max-width: 760px)").matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+// no injected wallet: on mobile deep-link into MetaMask's browser, on desktop point to install
+function showWalletHelp() {
+  const mobile = isMobile();
+  const dapp = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.search;
+  openModal(
+    `<div class="big-gem">${gemSVG(4, 74)}</div>
+     <h3>Connect a wallet</h3>
+     <p>Monad Meadow uses an EVM wallet to mint &amp; trade crystals on Monad testnet.</p>
+     ${mobile
+       ? `<p>This browser has no wallet. Open Monad Meadow <b>inside your wallet's browser</b> to connect.</p>`
+       : `<p>No browser wallet detected. Install <b>MetaMask</b> (or another EVM wallet extension), then reload this page.</p>`}`,
+    () => {
+      closeModal();
+      if (mobile) location.href = dapp;
+      else window.open("https://metamask.io/download/", "_blank", "noopener");
+    },
+    mobile ? "Open in MetaMask ↗" : "Get MetaMask ↗"
+  );
+}
+
 async function connectWallet() {
-  if (!hasWallet()) {
-    toast("No wallet found. Install MetaMask to mint & trade.", 5000);
-    return;
-  }
+  if (!hasWallet()) { showWalletHelp(); return; }
   try {
     const accts = await window.ethereum.request({ method: "eth_requestAccounts" });
     await ensureChain();
@@ -172,7 +191,9 @@ async function connectWallet() {
     refreshBalance();
     refreshMarket();
   } catch (e) {
-    toast("Wallet connection cancelled.");
+    // 4001 = user rejected; anything else is a real error worth surfacing
+    if (e && e.code === 4001) toast("Wallet connection cancelled.");
+    else toast("Couldn't connect: " + ((e && e.message) || "unknown error").slice(0, 80), 5000);
   }
 }
 
