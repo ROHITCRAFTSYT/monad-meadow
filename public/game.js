@@ -26,6 +26,28 @@ const CHAIN_HEX = "0x279f"; // 10143
 
 let CFG = null; // {contractAddress, rpc, chainId, explorer}
 
+// ------------------------------------------------------------------ room / invite
+function genRoomCode() {
+  const alpha = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // unambiguous chars only
+  let s = "";
+  const a = new Uint32Array(5);
+  try { crypto.getRandomValues(a); } catch {}
+  for (let i = 0; i < 5; i++) s += alpha[(a[i] || Math.floor(Math.random() * 1e9)) % alpha.length];
+  return s;
+}
+function currentRoom() {
+  const u = new URL(location.href);
+  let r = (u.searchParams.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  if (!r) {
+    r = genRoomCode();
+    u.searchParams.set("room", r);
+    history.replaceState(null, "", u.toString());
+  }
+  return r;
+}
+const ROOM = currentRoom();
+const INVITE_URL = location.origin + "/?room=" + ROOM;
+
 // ------------------------------------------------------------------ helpers
 const $ = (id) => document.getElementById(id);
 const encUint = (v) => BigInt(v).toString(16).padStart(64, "0");
@@ -422,7 +444,7 @@ let ws = null;
 let reconnectT = null;
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = new WebSocket(`${proto}://${location.host}/ws?room=${encodeURIComponent(ROOM)}`);
   ws.onopen = () => setPresence();
   ws.onclose = () => {
     setPresence(true);
@@ -447,7 +469,8 @@ function handleMsg(m) {
       crystals.clear();
       for (const c of m.crystals) crystals.set(c.id, { ...c, phase: Math.random() * 6.28 });
       setPresence();
-      addChat(null, "You wandered into the meadow. Say hello 🌿", true);
+      addChat(null, `You wandered into room ${ROOM}. Share the code or QR to invite friends 🌿`, true);
+      sendSavedName();
       break;
     case "join":
       players.set(m.player.id, { ...m.player, rx: m.player.x, ry: m.player.y });
@@ -1059,6 +1082,51 @@ if (hasWallet()) {
 }
 $("connectBtn").onclick = connectWallet;
 
+// ------------------------------------------------------------------ room UI
+function applyName() {
+  const v = ($("nameInput").value || "").slice(0, 16).trim();
+  if (!v) return;
+  try { localStorage.setItem("mm_name", v); } catch {}
+  if (me) me.name = v;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "name", name: v }));
+}
+function sendSavedName() {
+  let v = "";
+  try { v = (localStorage.getItem("mm_name") || "").slice(0, 16).trim(); } catch {}
+  if (v && me) {
+    me.name = v;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "name", name: v }));
+  }
+}
+function setupRoomUI() {
+  $("roomCode").textContent = ROOM;
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(INVITE_URL);
+    qr.make();
+    $("qrBox").innerHTML = qr.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
+  } catch (e) {
+    $("qrBox").textContent = "QR";
+  }
+  $("copyInvite").onclick = async () => {
+    try { await navigator.clipboard.writeText(INVITE_URL); toast("Invite link copied ✦"); }
+    catch { toast(INVITE_URL, 6000); }
+  };
+  const join = () => {
+    const code = ($("joinCode").value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    if (code && code !== ROOM) location.href = location.origin + "/?room=" + code;
+  };
+  $("joinBtn").onclick = join;
+  const jc = $("joinCode"), nm = $("nameInput");
+  jc.addEventListener("keydown", (e) => { if (e.key === "Enter") join(); });
+  jc.addEventListener("focus", () => (typing = true));
+  jc.addEventListener("blur", () => (typing = false));
+  try { nm.value = localStorage.getItem("mm_name") || ""; } catch {}
+  nm.addEventListener("focus", () => (typing = true));
+  nm.addEventListener("blur", () => { typing = false; applyName(); });
+  nm.addEventListener("keydown", (e) => { if (e.key === "Enter") { applyName(); nm.blur(); } });
+}
+
 // ------------------------------------------------------------------ boot
 async function boot() {
   try {
@@ -1069,6 +1137,7 @@ async function boot() {
   await loadSheets();
   makeGemTints();
   buildWorld();
+  setupRoomUI();
   renderSatchel();
   connectWS();
   refreshMarket();

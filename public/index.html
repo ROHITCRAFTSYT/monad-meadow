@@ -31,6 +31,24 @@
       </div>
     </header>
 
+    <!-- Room / invite (top-left) -->
+    <section class="hud panel room-card" id="roomCard">
+      <div class="panel-h">Your room <button class="mini" id="copyInvite" title="Copy invite link">copy link</button></div>
+      <div class="room-row">
+        <div id="qrBox" class="qr" title="Scan to join"></div>
+        <div class="room-meta">
+          <div class="room-label">team code</div>
+          <div class="room-code" id="roomCode">·····</div>
+          <div class="room-hint">Share the code or QR — friends join <b>your</b> world.</div>
+        </div>
+      </div>
+      <div class="room-actions">
+        <input id="nameInput" placeholder="your name" maxlength="16" autocomplete="off" />
+        <input id="joinCode" placeholder="join code" maxlength="8" autocomplete="off" />
+        <button class="mini" id="joinBtn">Join</button>
+      </div>
+    </section>
+
     <!-- Inventory / mint (bottom-left) -->
     <section class="hud panel bottom-left" id="satchel">
       <div class="panel-h">Your satchel <span class="hint">gathered, not yet onchain</span></div>
@@ -81,6 +99,7 @@
       </div>
     </div>
 
+    <script src="/qrcode.js"></script>
     <script src="/game.js"></script>
   </body>
 </html>
