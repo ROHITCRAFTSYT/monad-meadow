@@ -91,6 +91,18 @@ async function rpc(method, params) {
 }
 const ethCall = (data) => rpc("eth_call", [{ to: CFG.contractAddress, data }, "latest"]);
 
+// wait for a tx to actually land on Monad, so wallet/market updates reflect real state
+async function waitForReceipt(hash, tries = 40) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await rpc("eth_getTransactionReceipt", [hash]);
+      if (r && r.blockNumber) return r;
+    } catch {}
+    await new Promise((res) => setTimeout(res, 700));
+  }
+  return null;
+}
+
 async function readNextTokenId() {
   return parseInt(await ethCall(SEL.nextTokenId), 16);
 }
@@ -173,11 +185,19 @@ async function tryReconnectWallet() {
     }
   } catch {}
 }
+let _lastBal = null;
 async function refreshBalance() {
   if (!wallet.addr) return;
   try {
-    const b = await rpc("eth_getBalance", [wallet.addr, "latest"]);
-    $("acctBal").textContent = formatEther(BigInt(b), 3) + " MON";
+    const b = BigInt(await rpc("eth_getBalance", [wallet.addr, "latest"]));
+    const el = $("acctBal");
+    el.textContent = formatEther(b, 3) + " MON";
+    if (_lastBal !== null && b !== _lastBal) {
+      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+      const d = b - _lastBal;
+      toast(`${d > 0n ? "+" : "−"}${formatEther(d < 0n ? -d : d, 4)} MON in your wallet`);
+    }
+    _lastBal = b;
   } catch {}
 }
 async function sendTx({ data, value }) {
@@ -256,7 +276,7 @@ function tile(sheet, idx, wx, wy, size, flip) {
 const T = {
   grass: 0, grassA: 1, grassB: 2,          // town
   treeGreen: 4, treeRound: 5, treeAutumn: 3,
-  bush: 6, berry: 30, path: 39, pathA: 40,
+  bush: 6, berry: 30, path: 39, pathA: 40, stone: 43, flower: 2,
   fenceH: 45, fenceMid: 46,
   soil: 0, soilA: 1,                        // farm
   crops: [8, 44, 32, 18, 20],               // farm: carrot, pumpkin, corn, eggplant, plant
@@ -280,6 +300,7 @@ let ground = [];       // [{sheet,idx}] per cell
 let dungeonMask = [];  // bool per cell
 const decor = [];      // static objects {wx,wy,sheet,idx,size,ay}
 const colliders = [];  // solid boxes {l,t,r,b} the player can't walk through
+const water = [];      // {x,y,rx,ry,fountain} drawn water features
 const motes = [];
 const gemTint = [];    // 5 pre-tinted gem canvases
 
@@ -302,6 +323,9 @@ function makeGemTints() {
   }
 }
 
+// A hand-designed world: a village plaza with a fountain at the crossroads,
+// an organized farm with crop rows + an animal pen, a forest grove, ponds,
+// and a walled dungeon — all linked by dirt roads. Deterministic per world size.
 function buildWorld() {
   const rnd = lcg(0x1a2b3c);
   GCOLS = Math.ceil(world.w / TILE);
@@ -309,114 +333,141 @@ function buildWorld() {
   ground = new Array(GCOLS * GROWS);
   dungeonMask = new Array(GCOLS * GROWS).fill(false);
   colliders.length = 0;
+  decor.length = 0;
+  water.length = 0;
+  motes.length = 0;
 
-  // dungeon region (top-right cave)
-  const dx0 = GCOLS - 15, dx1 = GCOLS - 3, dy0 = 2, dy1 = 11;
-  // farm plots (rectangles of soil)
-  const plots = [];
-  for (let i = 0; i < 4; i++) {
-    const pw = 4 + ((rnd() * 3) | 0), ph = 3 + ((rnd() * 2) | 0);
-    const px = 2 + ((rnd() * (GCOLS - pw - 18)) | 0);
-    const py = 3 + ((rnd() * (GROWS - ph - 4)) | 0);
-    plots.push({ px, py, pw, ph });
-  }
-  const inRect = (c, r, R) => c >= R.px && c < R.px + R.pw && r >= R.py && r < R.py + R.ph;
+  const midC = GCOLS >> 1, midR = GROWS >> 1;
+  const rectOf = (c0, r0, c1, r1) => ({ c0, r0, c1, r1 });
+  const inR = (c, r, R) => c >= R.c0 && c <= R.c1 && r >= R.r0 && r <= R.r1;
 
+  // --- zones ---------------------------------------------------------------
+  const dungeon = rectOf(GCOLS - 13, 2, GCOLS - 3, 10);      // walled cave, top-right
+  const plaza = rectOf(midC - 4, midR - 3, midC + 4, midR + 3); // village square, center
+  const farm = rectOf(3, GROWS - 10, 15, GROWS - 3);          // farm district, bottom-left
+  const pen = rectOf(farm.c0 + 9, farm.r0 + 1, farm.c1, farm.r0 + 4); // animal pen inside farm
+  const forest = rectOf(2, 2, midC - 7, 9);                   // grove, top-left
+
+  // roads: a main cross through the plaza, plus branches to farm & dungeon
+  const isRoad = (c, r) =>
+    (Math.abs(r - midR) <= 0 && !inR(c, r, plaza)) ||               // horizontal avenue
+    (Math.abs(c - midC) <= 0 && !inR(c, r, plaza)) ||               // vertical avenue
+    (c === farm.c0 + 5 && r > farm.r0 - 3 && r <= midR) ||          // plaza -> farm
+    (r === dungeon.r1 + 1 && c >= midC && c <= dungeon.c0 + 2) ||   // plaza -> dungeon
+    (c === dungeon.c0 - 3 && r >= dungeon.r1 + 1 && r <= 3 + dungeon.r1); // short spur
+
+  // --- ground --------------------------------------------------------------
   for (let r = 0; r < GROWS; r++) {
     for (let c = 0; c < GCOLS; c++) {
       const i = r * GCOLS + c;
-      const inDungeon = c >= dx0 && c <= dx1 && r >= dy0 && r <= dy1;
-      if (inDungeon) {
+      if (inR(c, r, dungeon)) {
         dungeonMask[i] = true;
-        const wall = c === dx0 || c === dx1 || r === dy0 || r === dy1;
-        if (wall) {
-          // leave a doorway on the left wall so players can enter the dungeon
-          const doorway = c === dx0 && r === ((dy0 + dy1) >> 1);
+        const wall = c === dungeon.c0 || c === dungeon.c1 || r === dungeon.r0 || r === dungeon.r1;
+        const door = c === dungeon.c0 && r === ((dungeon.r0 + dungeon.r1) >> 1);
+        if (wall && !door) {
           ground[i] = { sheet: "dungeon", idx: rnd() < 0.5 ? T.dWall : T.dWallA };
-          if (!doorway) colliders.push({ l: c * TILE + 2, t: r * TILE + 2, r: c * TILE + TILE - 2, b: r * TILE + TILE - 2 });
-          if (doorway) ground[i] = { sheet: "dungeon", idx: T.dFloor };
+          colliders.push({ l: c * TILE + 2, t: r * TILE + 2, r: c * TILE + TILE - 2, b: r * TILE + TILE - 2 });
         } else {
           ground[i] = { sheet: "dungeon", idx: rnd() < 0.4 ? T.dFloorA : rnd() < 0.5 ? T.dFloorB : T.dFloor };
         }
-        continue;
-      }
-      let plot = null;
-      for (const P of plots) if (inRect(c, r, P)) { plot = P; break; }
-      if (plot) {
+      } else if (inR(c, r, farm)) {
         ground[i] = { sheet: "farm", idx: rnd() < 0.5 ? T.soil : T.soilA };
-        continue;
+      } else if (inR(c, r, plaza)) {
+        ground[i] = { sheet: "town", idx: T.stone };
+      } else if (isRoad(c, r)) {
+        ground[i] = { sheet: "town", idx: rnd() < 0.5 ? T.path : T.pathA };
+      } else {
+        const v = rnd();
+        ground[i] = { sheet: "town", idx: v < 0.12 ? T.grassA : v < 0.2 ? T.grassB : T.grass };
       }
-      // dirt cross-paths through the meadow
-      const onPath = Math.abs(r - (GROWS >> 1)) < 1 || Math.abs(c - (GCOLS >> 1)) < 1;
-      if (onPath) { ground[i] = { sheet: "town", idx: rnd() < 0.5 ? T.path : T.pathA }; continue; }
-      // grass with subtle variety
-      const v = rnd();
-      ground[i] = { sheet: "town", idx: v < 0.12 ? T.grassA : v < 0.2 ? T.grassB : T.grass };
     }
   }
 
-  // decorations
-  decor.length = 0;
-  const cellFree = (c, r) => {
+  const isGrass = (c, r) => {
     if (c < 0 || r < 0 || c >= GCOLS || r >= GROWS) return false;
-    const i = r * GCOLS + c;
-    if (dungeonMask[i]) return false;
-    return ground[i].sheet === "town" && ground[i].idx <= T.grassB;
+    const g = ground[r * GCOLS + c];
+    return g.sheet === "town" && g.idx <= T.grassB && !isRoad(c, r);
   };
   const place = (sheet, idx, c, r, size, solid) => {
     const o = { wx: c * TILE + (TILE - size) / 2, wy: r * TILE + (TILE - size) - 6, sheet, idx, size, ay: r * TILE + TILE };
     decor.push(o);
     if (solid) {
-      // a footprint box at the base of the sprite, so the player collides with
-      // the trunk/fence/prop rather than the whole (often mostly-empty) tile
-      const bw = size * (solid === "fence" ? 0.94 : solid === "tree" ? 0.34 : 0.52);
-      const bh = size * (solid === "fence" ? 0.44 : 0.26);
+      const bw = size * (solid === "fence" ? 0.96 : solid === "tree" ? 0.32 : 0.5);
+      const bh = size * (solid === "fence" ? 0.5 : 0.26);
       const cxp = o.wx + size / 2, byp = o.wy + size - 5;
       colliders.push({ l: cxp - bw / 2, t: byp - bh, r: cxp + bw / 2, b: byp });
     }
     return o;
   };
+  const fenceRing = (R) => {
+    for (let c = R.c0 - 1; c <= R.c1 + 1; c++) { place("town", T.fenceH, c, R.r0 - 1, 40, "fence"); if (c !== R.c0 + ((R.c1 - R.c0) >> 1)) place("town", T.fenceH, c, R.r1 + 1, 40, "fence"); }
+    for (let r = R.r0; r <= R.r1; r++) { place("town", T.fenceH, R.c0 - 1, r, 40, "fence"); place("town", T.fenceH, R.c1 + 1, r, 40, "fence"); }
+  };
 
-  // trees (solid)
-  for (let n = 0; n < 40; n++) {
-    const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
-    if (!cellFree(c, r)) continue;
-    const k = rnd();
-    place("town", k < 0.5 ? T.treeGreen : k < 0.8 ? T.treeRound : T.treeAutumn, c, r, 64, "tree");
-  }
-  // bushes / berries (passable — soft scenery)
-  for (let n = 0; n < 46; n++) {
-    const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
-    if (!cellFree(c, r)) continue;
-    place("town", rnd() < 0.35 ? T.berry : T.bush, c, r, 40);
-  }
-  // crops on the soil plots (passable) + fences around them (solid)
-  for (const P of plots) {
-    for (let r = P.py; r < P.py + P.ph; r++) for (let c = P.px; c < P.px + P.pw; c++) {
-      if (rnd() < 0.55) place("farm", T.crops[(rnd() * T.crops.length) | 0], c, r, 34);
-    }
-    for (let c = P.px - 1; c <= P.px + P.pw; c++) {
-      place("town", T.fenceH, c, P.py - 1, 40, "fence");
-      place("town", T.fenceH, c, P.py + P.ph, 40, "fence");
+  // --- forest grove: dense trees on a jittered grid ------------------------
+  for (let r = forest.r0; r <= forest.r1; r++) {
+    for (let c = forest.c0; c <= forest.c1; c++) {
+      if (!isGrass(c, r)) continue;
+      if ((c + r) % 2 === 0 && rnd() < 0.8) {
+        const k = rnd();
+        place("town", k < 0.55 ? T.treeGreen : k < 0.82 ? T.treeRound : T.treeAutumn, c, r, 64, "tree");
+      } else if (rnd() < 0.3) place("town", T.bush, c, r, 38);
     }
   }
-  // farm animals wandering the meadow (passable)
-  for (let n = 0; n < 7; n++) {
-    const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
-    if (!cellFree(c, r)) continue;
+  // tree-lined avenue beside the main roads
+  for (let c = 2; c < GCOLS - 2; c += 3) {
+    for (const r of [midR - 2, midR + 2]) if (isGrass(c, r) && rnd() < 0.6) place("town", rnd() < 0.6 ? T.treeGreen : T.treeRound, c, r, 58, "tree");
+  }
+
+  // --- farm: crop rows, perimeter fence w/ gate, animal pen, barn ----------
+  for (let r = farm.r0; r <= farm.r1; r++) {
+    for (let c = farm.c0; c <= farm.c1; c++) {
+      if (inR(c, r, pen)) continue;
+      if (r % 2 === 0) place("farm", T.crops[(c + r) % T.crops.length], c, r, 34); // neat rows
+    }
+  }
+  fenceRing(farm);
+  fenceRing(pen);
+  for (let n = 0; n < 4; n++) {
+    const c = pen.c0 + ((rnd() * (pen.c1 - pen.c0 + 1)) | 0), r = pen.r0 + ((rnd() * (pen.r1 - pen.r0 + 1)) | 0);
     place("farm", T.animals[(rnd() * T.animals.length) | 0], c, r, 32);
-    const o = decor[decor.length - 1];
-    o.animal = true; o.bx = o.wx; o.by = o.wy; o.ph = rnd() * 6.28;
+    const o = decor[decor.length - 1]; o.animal = true; o.bx = o.wx; o.by = o.wy; o.ph = rnd() * 6.28;
   }
-  // dungeon loot: chests + barrels (solid props)
+  place("farm", T.barrel, farm.c1, farm.r1, 34, "prop");
+
+  // --- plaza: fountain at the crossroads, flower beds, benches -------------
+  water.push({ x: (midC + 0.5) * TILE, y: (midR + 0.5) * TILE, rx: TILE * 1.15, ry: TILE * 0.9, fountain: true });
+  colliders.push({ l: (midC + 0.5) * TILE - TILE * 0.9, t: (midR + 0.5) * TILE - TILE * 0.5, r: (midC + 0.5) * TILE + TILE * 0.9, b: (midR + 0.5) * TILE + TILE * 0.7 });
+  for (let c = plaza.c0; c <= plaza.c1; c++) {
+    if (rnd() < 0.7) place("town", T.flower, c, plaza.r0, 30);
+    if (rnd() < 0.7) place("town", T.flower, c, plaza.r1, 30);
+  }
+  place("town", T.berry, plaza.c0, plaza.r0, 40);
+  place("town", T.berry, plaza.c1, plaza.r1, 40);
+
+  // --- ponds in the open meadow (with reeds) ------------------------------
+  const pondSpots = [[midC + 9, midR + 6], [8, 6], [GCOLS - 6, GROWS - 5]];
+  for (const [pc, pr] of pondSpots) {
+    if (pc < 2 || pc > GCOLS - 3 || pr < 2 || pr > GROWS - 3) continue;
+    const x = (pc + 0.5) * TILE, y = (pr + 0.5) * TILE, rx = TILE * (1.4 + rnd()), ry = TILE * (1 + rnd() * 0.6);
+    water.push({ x, y, rx, ry });
+    colliders.push({ l: x - rx * 0.7, t: y - ry * 0.6, r: x + rx * 0.7, b: y + ry * 0.7 });
+    for (let a = 0; a < 6; a++) { const c = pc + ((Math.cos(a) * 2) | 0), r = pr + ((Math.sin(a) * 1.6) | 0); if (isGrass(c, r) && rnd() < 0.5) place("town", T.bush, c, r, 34); }
+  }
+
+  // --- gentle scatter of flowers in the open meadow (life, not clutter) ----
+  for (let n = 0; n < 30; n++) {
+    const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
+    if (isGrass(c, r) && !inR(c, r, forest)) place("town", rnd() < 0.5 ? T.flower : T.bush, c, r, 30);
+  }
+
+  // --- dungeon loot -------------------------------------------------------
   for (let n = 0; n < 5; n++) {
-    const c = dx0 + 1 + ((rnd() * (dx1 - dx0 - 1)) | 0), r = dy0 + 1 + ((rnd() * (dy1 - dy0 - 1)) | 0);
+    const c = dungeon.c0 + 1 + ((rnd() * (dungeon.c1 - dungeon.c0 - 1)) | 0), r = dungeon.r0 + 1 + ((rnd() * (dungeon.r1 - dungeon.r0 - 1)) | 0);
     place("dungeon", rnd() < 0.5 ? T.chest : T.barrel, c, r, 34, "prop");
   }
-  decor.sort((a, b) => a.ay - b.ay);
 
-  // ambient motes
-  motes.length = 0;
+  decor.sort((a, b) => a.ay - b.ay);
   for (let i = 0; i < 40; i++) motes.push({ x: rnd() * world.w, y: rnd() * world.h, sp: 4 + rnd() * 10, ph: rnd() * 6.28, a: 0.08 + rnd() * 0.14 });
 }
 
@@ -624,6 +675,9 @@ function render(now) {
     }
   }
 
+  // water features (ponds + plaza fountain)
+  for (const w of water) drawWater(w, now);
+
   // motes
   for (const m of motes) {
     const y = m.y + Math.sin(now / 1000 * (m.sp / 8) + m.ph) * 18;
@@ -662,6 +716,40 @@ function render(now) {
   ctx.restore();
 }
 
+function drawWater(w, now) {
+  const { x, y, rx, ry } = w;
+  if (w.fountain) {
+    // stone basin rim
+    ctx.fillStyle = "#cdd3da";
+    ctx.beginPath(); ctx.ellipse(x, y, rx + 7, ry + 6, 0, 0, 6.28); ctx.fill();
+    ctx.fillStyle = "#eef1f5";
+    ctx.beginPath(); ctx.ellipse(x, y, rx + 3, ry + 2, 0, 0, 6.28); ctx.fill();
+  } else {
+    // muddy/grassy bank
+    ctx.fillStyle = "rgba(120,150,120,0.35)";
+    ctx.beginPath(); ctx.ellipse(x, y, rx + 5, ry + 4, 0, 0, 6.28); ctx.fill();
+  }
+  // water body
+  const g = ctx.createRadialGradient(x, y - ry * 0.3, 2, x, y, rx);
+  g.addColorStop(0, "#bfe3ff");
+  g.addColorStop(1, "#7fb4e6");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 6.28); ctx.fill();
+  // shimmer lines
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 3; i++) {
+    const yy = y - ry * 0.4 + i * ry * 0.4 + Math.sin(now / 700 + i) * 2;
+    ctx.beginPath(); ctx.ellipse(x, yy, rx * (0.55 - i * 0.12), ry * 0.12, 0, 0, 6.28); ctx.stroke();
+  }
+  if (w.fountain) {
+    // gentle spout sparkle
+    const s = 0.5 + 0.5 * Math.sin(now / 300);
+    ctx.fillStyle = `rgba(255,255,255,${0.5 + s * 0.4})`;
+    ctx.beginPath(); ctx.arc(x, y - ry * 0.2 - s * 6, 3.5, 0, 6.28); ctx.fill();
+  }
+}
+
 function softShadow(x, y, rx) {
   ctx.fillStyle = "rgba(60,80,70,0.16)";
   ctx.beginPath();
@@ -691,9 +779,18 @@ function drawCrystal(c, now) {
   rg.addColorStop(1, col + "00");
   ctx.fillStyle = rg;
   ctx.beginPath(); ctx.arc(c.x, y, 30 + pulse * 8, 0, 6.28); ctx.fill();
-  // tinted gem sprite
-  const g = gemTint[c.kind];
-  if (g) ctx.drawImage(g, c.x - 16, y - 16, 32, 32);
+  // procedural faceted gem (crisp, colored per kind)
+  ctx.save();
+  ctx.translate(c.x, y);
+  ctx.beginPath();
+  ctx.moveTo(0, -13); ctx.lineTo(10, -2); ctx.lineTo(0, 14); ctx.lineTo(-10, -2); ctx.closePath();
+  ctx.fillStyle = col; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5;
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(0, 14); ctx.lineTo(-10, -2); ctx.closePath();
+  ctx.fillStyle = "rgba(0,0,0,0.14)"; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(10, -2); ctx.lineTo(0, -2); ctx.closePath();
+  ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fill();
+  ctx.restore();
   if (isNear) {
     ctx.strokeStyle = "rgba(75,157,134,0.9)";
     ctx.lineWidth = 2.5;
@@ -824,7 +921,7 @@ async function openMintModal(kind) {
         toastTx("Minted a " + KIND.names[kind] + " ✦", h);
         chime(660);
         celebrate(kind);
-        setTimeout(() => { refreshBalance(); refreshMarket(); }, 2500);
+        waitForReceipt(h).then(() => { refreshBalance(); refreshMarket(); });
       } catch (e) {
         toast(txErr(e));
       } finally {
@@ -849,7 +946,7 @@ function openListModal(tokenId, kind) {
         const h = await sendTx({ data: SEL.list + encUint(tokenId) + encUint(price) });
         closeModal();
         toastTx(`Listed ${KIND.names[kind]} #${tokenId}`, h);
-        setTimeout(refreshMarket, 2500);
+        waitForReceipt(h).then(refreshMarket);
       } catch (e) { toast(txErr(e)); } finally { $("modalConfirm").disabled = false; }
     },
     "List for sale"
@@ -870,7 +967,7 @@ async function buyToken(tokenId, kind, price) {
         toastTx(`Bought ${KIND.names[kind]} #${tokenId} ✦`, h);
         chime(720);
         celebrate(kind);
-        setTimeout(() => { refreshBalance(); refreshMarket(); }, 2500);
+        waitForReceipt(h).then(() => { refreshBalance(); refreshMarket(); });
       } catch (e) { toast(txErr(e)); } finally { $("modalConfirm").disabled = false; }
     },
     "Buy for " + formatEther(price) + " MON"
@@ -881,7 +978,7 @@ async function cancelToken(tokenId, kind) {
   try {
     const h = await sendTx({ data: SEL.cancelListing + encUint(tokenId) });
     toastTx(`Unlisted ${KIND.names[kind]} #${tokenId}`, h);
-    setTimeout(refreshMarket, 2500);
+    waitForReceipt(h).then(refreshMarket);
   } catch (e) { toast(txErr(e)); }
 }
 
@@ -911,6 +1008,8 @@ async function refreshMarket() {
 
     // For sale
     const forSale = rows.filter((r) => r.listing.seller !== "0x0000000000000000000000000000000000000000");
+    const stats = $("marketStats");
+    if (stats) stats.innerHTML = `<b>${Math.max(0, n - 1)}</b> crystals minted onchain · <b>${forSale.length}</b> listed for MON`;
     const ml = $("marketList");
     ml.innerHTML = "";
     if (forSale.length === 0) {
