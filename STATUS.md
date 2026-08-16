@@ -23,6 +23,7 @@ _Last updated during the build session. This is the single source of truth for w
 
 **Game (`worker/` + `public/`)**
 - Cloudflare Worker + Durable Object `WorldRoom` — realtime multiplayer over WebSockets. **Verified live** with a 2-client test (join/move/world-sync all work).
+- **Private rooms** — every session generates a unique team code (in the URL); friends join by entering the code or scanning the **QR** shown in the corner. Rooms are fully isolated (verified: cross-room clients are invisible to each other). Players set their own name (persisted, propagates to others). QR via vendored **MIT `qrcode-generator`**.
 - Canvas client, **Kenney CC0 sprites** (Tiny Town / Farm / Dungeon) — farmland + dungeon world, animated hero sprites, crystals, farm animals, ambient motes.
 - **Collision / spatial awareness** — 143 solid colliders (trees, fences, dungeon walls, props) with per-axis sliding. Sprite no longer walks through things.
 - **Wallet** — connect via injected wallet (MetaMask etc.), auto add/switch Monad testnet, balance display. **Persists across reloads** (silent `eth_accounts` restore).
