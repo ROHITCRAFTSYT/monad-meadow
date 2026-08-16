@@ -373,6 +373,50 @@ const KIND_VALUE = [0.01, 0.02, 0.03, 0.04, 0.05];
 // Reward amounts for gathering each crystal kind (in MON) — matches contract rewardAmount
 const REWARD_VALUE = [0.005, 0.01, 0.015, 0.02, 0.025];
 
+// ------------------------------------------------------------------ dynamic market pricing
+// Market prices fluctuate randomly every few seconds. They are always higher
+// than the mint cost so there's a real incentive to trade.
+const marketPrice = [0, 0, 0, 0, 0];      // current suggested sell price per kind
+const marketTrend = [0, 0, 0, 0, 0];       // -1 down, 0 flat, +1 up (for arrow display)
+let _marketTickTimer = 0;
+const MARKET_TICK_MIN = 8000;  // ms between price changes
+const MARKET_TICK_MAX = 15000;
+let _nextMarketTick = MARKET_TICK_MIN + Math.random() * (MARKET_TICK_MAX - MARKET_TICK_MIN);
+
+function initMarketPrices() {
+  for (let k = 0; k < KIND_COUNT; k++) {
+    // start at 3x-6x mint price
+    const mult = 3 + Math.random() * 3;
+    marketPrice[k] = +(KIND_VALUE[k] * mult).toFixed(4);
+  }
+}
+
+function tickMarketPrices(dt) {
+  _marketTickTimer += dt * 1000;
+  if (_marketTickTimer < _nextMarketTick) return false;
+  _marketTickTimer = 0;
+  _nextMarketTick = MARKET_TICK_MIN + Math.random() * (MARKET_TICK_MAX - MARKET_TICK_MIN);
+
+  for (let k = 0; k < KIND_COUNT; k++) {
+    const old = marketPrice[k];
+    // random walk: -20% to +30% (slight upward bias)
+    const delta = -0.20 + Math.random() * 0.50;
+    let next = old * (1 + delta);
+    // floor: always at least 2× mint price
+    const floor = KIND_VALUE[k] * 2;
+    // ceiling: 8× mint price
+    const ceil = KIND_VALUE[k] * 8;
+    next = Math.max(floor, Math.min(ceil, next));
+    marketPrice[k] = +next.toFixed(4);
+    marketTrend[k] = marketPrice[k] > old ? 1 : marketPrice[k] < old ? -1 : 0;
+  }
+  // re-render satchel to show updated values
+  renderSatchel();
+  return true;
+}
+
+initMarketPrices();
+
 function makeGemTints() {
   const img = SHEETS.dungeon;
   for (let k = 0; k < KIND_COUNT; k++) {
@@ -731,6 +775,8 @@ function blocked(x, y) {
 }
 
 function update(dt, now) {
+  // tick the dynamic market prices
+  tickMarketPrices(dt);
   if (me) {
     let dx = 0, dy = 0;
     if (keys["w"] || keys["arrowup"]) dy -= 1;
@@ -889,6 +935,9 @@ function render(now) {
 
   ctx.restore();
 
+  // ---- Canvas overlay banner: "Trade peer-to-peer for MON" ----
+  drawTradeOverlay(now, vw, vh);
+
   // Draw player health HUD (screen-space, not world-space)
   if (me && dragon && !dragonDefeated) {
     const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
@@ -919,6 +968,66 @@ function render(now) {
       ctx.fillText(`HP: ${Math.max(0, Math.round(playerHealth))}/${PLAYER_MAX_HEALTH}`, hx + hw / 2, hy + 15);
     }
   }
+}
+
+// ------------------------------------------------------------------ trade overlay banner
+function drawTradeOverlay(now, vw, vh) {
+  const pulse = 0.5 + 0.5 * Math.sin(now / 1200);
+  const bannerW = 380;
+  const bannerH = 48;
+  const bx = vw / 2 - bannerW / 2;
+  const by = vh - 64;
+
+  // glowing background pill
+  ctx.save();
+  ctx.globalAlpha = 0.7 + pulse * 0.2;
+  const grad = ctx.createLinearGradient(bx, by, bx + bannerW, by);
+  grad.addColorStop(0, "rgba(75, 157, 134, 0.92)");
+  grad.addColorStop(0.5, "rgba(107, 191, 168, 0.95)");
+  grad.addColorStop(1, "rgba(75, 157, 134, 0.92)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bannerW, bannerH, 24);
+  ctx.fill();
+
+  // subtle glow halo
+  ctx.shadowColor = "rgba(107, 191, 168, 0.6)";
+  ctx.shadowBlur = 20 + pulse * 10;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bannerW, bannerH, 24);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
+
+  // text
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 16px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("◈ Trade peer-to-peer for MON ◈", vw / 2, by + bannerH / 2);
+
+  // live price ticker strip below the banner
+  const tickerY = by + bannerH + 8;
+  const tickerH = 22;
+  ctx.globalAlpha = 0.65 + pulse * 0.15;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.beginPath();
+  ctx.roundRect(bx + 20, tickerY, bannerW - 40, tickerH, 11);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.font = "600 11px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  const gap = (bannerW - 40) / KIND_COUNT;
+  for (let k = 0; k < KIND_COUNT; k++) {
+    const tx = bx + 20 + gap * k + gap / 2;
+    const arrow = marketTrend[k] > 0 ? "▲" : marketTrend[k] < 0 ? "▼" : "●";
+    const color = marketTrend[k] > 0 ? "#6eff8e" : marketTrend[k] < 0 ? "#ff7a7a" : "#ffd98e";
+    ctx.fillStyle = color;
+    ctx.fillText(`${arrow}${marketPrice[k]}`, tx, tickerY + tickerH / 2 + 1);
+  }
+  ctx.restore();
 }
 
 function drawWater(w, now) {
@@ -1005,10 +1114,16 @@ function drawCrystal(c, now) {
     ctx.textAlign = "center";
     ctx.fillStyle = KIND.colors[c.kind];
     ctx.font = "700 13px Segoe UI";
-    ctx.fillText(`${KIND.names[c.kind]} · ${KIND_VALUE[c.kind]} MON`, c.x, y - 34);
+    ctx.fillText(`${KIND.names[c.kind]} · Mint ${KIND_VALUE[c.kind]} MON`, c.x, y - 42);
+    // show dynamic market value
+    const mktVal = marketPrice[c.kind];
+    const tArrow = marketTrend[c.kind] > 0 ? "▲" : marketTrend[c.kind] < 0 ? "▼" : "";
+    ctx.fillStyle = marketTrend[c.kind] > 0 ? "#3ddb6a" : marketTrend[c.kind] < 0 ? "#ff6b6b" : "#ffd98e";
+    ctx.font = "700 12px Segoe UI";
+    ctx.fillText(`Market: ${tArrow}${mktVal} MON`, c.x, y - 27);
     ctx.fillStyle = "rgba(70,80,99,0.8)";
     ctx.font = "600 11px Segoe UI";
-    ctx.fillText("Space to gather", c.x, y - 20);
+    ctx.fillText("Space to gather", c.x, y - 14);
   }
 }
 
@@ -1182,25 +1297,31 @@ function burstConfetti(id, kind) {
 function renderSatchel() {
   const grid = $("satchelGrid");
   grid.innerHTML = "";
-  let any = false, total = 0;
+  let any = false, total = 0, marketTotal = 0;
   for (let k = 0; k < KIND_COUNT; k++) {
     const n = satchel[k];
-    if (n > 0) { any = true; total += n * KIND_VALUE[k]; }
+    if (n > 0) { any = true; total += n * KIND_VALUE[k]; marketTotal += n * marketPrice[k]; }
     const slot = document.createElement("div");
     slot.className = "satchel-slot" + (n > 0 ? "" : " empty");
+    const arrow = marketTrend[k] > 0 ? "▲" : marketTrend[k] < 0 ? "▼" : "";
+    const trendClass = marketTrend[k] > 0 ? "trend-up" : marketTrend[k] < 0 ? "trend-down" : "";
     slot.innerHTML = gemSVG(k, 28) + (n > 0 ? `<span class="count">${n}</span>` : "") +
-      `<span class="val">${KIND_VALUE[k]}</span>`;
-    slot.title = n > 0 ? `Mint ${KIND.names[k]} · ${KIND_VALUE[k]} MON` : `${KIND.names[k]} · ${KIND_VALUE[k]} MON`;
+      `<span class="val">${KIND_VALUE[k]}</span>` +
+      `<span class="mkt-val ${trendClass}">${arrow}${marketPrice[k]}</span>`;
+    slot.title = n > 0
+      ? `Mint ${KIND.names[k]} · ${KIND_VALUE[k]} MON | Market value: ${marketPrice[k]} MON`
+      : `${KIND.names[k]} · Mint ${KIND_VALUE[k]} MON | Market: ${marketPrice[k]} MON`;
     if (n > 0) slot.onclick = () => openMintModal(k);
     grid.appendChild(slot);
   }
   const empty = $("satchelEmpty");
   if (any) {
     empty.style.display = "block";
-    empty.innerHTML = `Satchel value ≈ <b>${total.toFixed(2)} MON</b>. Tap a crystal to mint it onchain (micro-tx), then list it in the market to sell (macro-tx).`;
+    const profit = (marketTotal - total).toFixed(2);
+    empty.innerHTML = `Mint cost ≈ <b>${total.toFixed(2)} MON</b> · Market value ≈ <b>${marketTotal.toFixed(2)} MON</b> · Potential profit: <b style="color:var(--accent-deep)">+${profit} MON</b>.<br/>Tap a crystal to mint, then list it at the dynamic market price!`;
   } else {
     empty.style.display = "block";
-    empty.innerHTML = `Walk up to a crystal and press <kbd>Space</kbd> to gather. Each kind is worth 0.01–0.05 MON.`;
+    empty.innerHTML = `Walk up to a crystal and press <kbd>Space</kbd> to gather. Mint for 0.01–0.05 MON, sell for <b>2×–8×</b> more on the market!`;
   }
   updateMarketProcessUI();
 }
@@ -1315,11 +1436,18 @@ async function openMintModal(kind) {
 }
 
 function openListModal(tokenId, kind) {
+  const suggestedPrice = marketPrice[kind] || (KIND_VALUE[kind] * 3);
+  const trendLabel = marketTrend[kind] > 0 ? "📈 Rising" : marketTrend[kind] < 0 ? "📉 Falling" : "➡️ Stable";
   openModal(
     `<div class="big-gem">${gemSVG(kind, 88)}</div>
      <h3>List ${KIND.names[kind]} #${tokenId}</h3>
      <p>Set a price in MON. It'll be escrowed until someone buys or you cancel.</p>
-     <input id="priceInput" inputmode="decimal" placeholder="0.10" />`,
+     <div class="market-suggest">
+       <div class="suggest-label">Dynamic market price</div>
+       <div class="suggest-price">${suggestedPrice} MON <span class="suggest-trend">${trendLabel}</span></div>
+       <div class="suggest-hint">Mint cost: ${KIND_VALUE[kind]} MON · Profit: +${(suggestedPrice - KIND_VALUE[kind]).toFixed(4)} MON</div>
+     </div>
+     <input id="priceInput" inputmode="decimal" placeholder="${suggestedPrice}" value="${suggestedPrice}" />`,
     async () => {
       const price = parseEther($("priceInput").value);
       if (price <= 0n) { toast("Enter a price above 0."); return; }
@@ -1332,7 +1460,7 @@ function openListModal(tokenId, kind) {
         waitForReceipt(h).then(refreshMarket);
       } catch (e) { toast(txErr(e)); } finally { $("modalConfirm").disabled = false; }
     },
-    "List for sale"
+    `List for ${suggestedPrice} MON`
   );
 }
 
@@ -1393,7 +1521,10 @@ async function refreshMarket() {
     // For sale
     const forSale = rows.filter((r) => r.listing.seller !== "0x0000000000000000000000000000000000000000");
     const stats = $("marketStats");
-    if (stats) stats.innerHTML = `<b>${Math.max(0, n - 1)}</b> crystals minted onchain · <b>${forSale.length}</b> listed for MON`;
+    if (stats) {
+      const avgMkt = (marketPrice.reduce((a, b) => a + b, 0) / KIND_COUNT).toFixed(3);
+      stats.innerHTML = `<b>${Math.max(0, n - 1)}</b> minted · <b>${forSale.length}</b> listed · Avg market: <b>${avgMkt} MON</b>`;
+    }
     const ml = $("marketList");
     ml.innerHTML = "";
     if (forSale.length === 0) {

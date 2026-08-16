@@ -139,7 +139,35 @@ kbd {
   color: var(--accent-deep); opacity: 0.85;
 }
 .satchel-slot .gem { width: 60%; height: 60%; }
+.satchel-slot .mkt-val {
+  position: absolute; right: 2px; top: 2px; font-size: 8px; font-weight: 700;
+  color: var(--ink-soft); opacity: 0.9; letter-spacing: -0.02em;
+  background: rgba(255,255,255,0.6); padding: 1px 3px; border-radius: 4px;
+}
+.satchel-slot .mkt-val.trend-up { color: #1aad4a; background: rgba(26,173,74,0.12); }
+.satchel-slot .mkt-val.trend-down { color: #e05252; background: rgba(224,82,82,0.12); }
 .satchel-empty { font-size: 11px; color: var(--ink-soft); margin-top: 8px; line-height: 1.5; }
+
+/* Market suggest widget in list modal */
+.market-suggest {
+  margin: 10px 0 6px; padding: 10px 14px; border-radius: 12px;
+  background: linear-gradient(135deg, rgba(107,191,168,0.12), rgba(107,191,168,0.04));
+  border: 1px solid rgba(107,191,168,0.25);
+  text-align: center;
+}
+.suggest-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--ink-soft); margin-bottom: 4px;
+}
+.suggest-price {
+  font-size: 20px; font-weight: 800; color: var(--accent-deep);
+}
+.suggest-trend {
+  font-size: 12px; font-weight: 600; margin-left: 6px;
+}
+.suggest-hint {
+  font-size: 10px; color: var(--ink-soft); margin-top: 3px;
+}
 
 /* Market */
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
