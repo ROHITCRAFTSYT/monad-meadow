@@ -8,16 +8,16 @@ _Last updated during the build session. This is the single source of truth for w
 | --- | --- |
 | **Live URL** | https://monad-meadow.lorq.workers.dev |
 | **GitHub repo** | https://github.com/ROHITCRAFTSYT/monad-meadow |
-| **Contract (Monad Testnet, 10143)** | `0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f` |
-| **Explorer (verified source)** | https://testnet.monadscan.com/address/0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f |
+| **Contract (Monad Testnet, 10143)** | `0xe8B6c37f78475024a5d08DB3dF358983a45357A7` |
+| **Explorer (verified source)** | https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7 |
 | **Deployment** | Cloudflare Workers + Durable Objects (game) · Monad Testnet (contract) |
-| **Example live mint tx** | `0x6a9ecb6b82bbe298b7bdbdd658da3eca0871d8169f67961c2cc0e747433f6bdc` |
+| **Example live mint tx** | [paste a recent tx hash from the current contract] |
 
 ## ✅ Done
 
 **Contract (`contracts/`)**
 - `MonadMeadow.sol` — ERC-721 + on-chain marketplace, OpenZeppelin (Ownable, ReentrancyGuard), fully on-chain SVG metadata.
-- `mintItem(uint8)` payable (micro-tx, 0.01–0.05 MON), `list/cancelListing/buy` (escrow marketplace, 2.5% treasury fee), owner controls (`setMintPrice`, `setFeeBps`, `withdrawTreasury`).
+- `mintItem(uint8)` payable (micro-tx, 0.01–0.05 MON), `list/cancelListing/buy` (escrow marketplace, 2.5% treasury fee), dragon economy (`claimDragonBounty` +10 MON, `payDeathPenalty` −5 MON), owner controls (`setMintPrice`, `setFeeBps`, `withdrawTreasury`).
 - **Deployed + verified** on Monad testnet (MonadScan + MonadVision, "perfect match").
 - **16 Foundry tests pass** — mint pricing, escrow list/buy, cancel/refund, fee accounting, owner-only permissions, metadata.
 
@@ -28,6 +28,7 @@ _Last updated during the build session. This is the single source of truth for w
 - **Collision / spatial awareness** — 143 solid colliders (trees, fences, dungeon walls, props) with per-axis sliding. Sprite no longer walks through things.
 - **Wallet** — connect via injected wallet (MetaMask etc.), auto add/switch Monad testnet, balance display. **Persists across reloads** (silent `eth_accounts` restore).
 - **On-chain flows in-game** — gather crystals → mint (micro-tx) → list/buy/cancel in Meadow Market (macro-tx, any price). Every crystal shows its MON value.
+- **Dragon boss fight** — PvE dungeon encounter with real economic stakes: win → claim 10 MON bounty (`claimDragonBounty()`), lose → pay 5 MON penalty (`payDeathPenalty()`). Real-time health bars, attack feedback, respawn. Bounties/penalties settled on-chain.
 - Chat, floating name/chat bubbles, confetti on mint/buy, optional ambient audio.
 - Zero client dependencies (raw JSON-RPC + hardcoded selectors) → demo-robust.
 

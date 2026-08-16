@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://monad-meadow.lorq.workers.dev"><strong>🎮 Play Now</strong></a> &nbsp;·&nbsp;
-  <a href="https://testnet.monadscan.com/address/0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f"><strong>📜 Verified Contract</strong></a> &nbsp;·&nbsp;
+  <a href="https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7"><strong>📜 Verified Contract</strong></a> &nbsp;·&nbsp;
   <a href="#architecture"><strong>🏗️ Architecture</strong></a> &nbsp;·&nbsp;
   <a href="#getting-started"><strong>🚀 Getting Started</strong></a>
 </p>
@@ -56,10 +56,10 @@ The project demonstrates a scalable architecture for blockchain gaming by pairin
 | Component | Details |
 |:--|:--|
 | **🎮 Application** | [monad-meadow.lorq.workers.dev](https://monad-meadow.lorq.workers.dev) |
-| **📜 Smart Contract** | [`0xd49c37f9...109d15f`](https://testnet.monadscan.com/address/0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f) — Verified on Monad Testnet |
+| **📜 Smart Contract** | [`0xe8B6c37f...a45357A7`](https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7) — Verified on Monad Testnet |
 | **🔗 Network** | Monad Testnet · Chain ID `10143` |
 | **☁️ Infrastructure** | Cloudflare Workers + Durable Objects |
-| **🧾 Example Tx** | [`0x6a9ecb6b...433f6bdc`](https://testnet.monadscan.com/tx/0x6a9ecb6b82bbe298b7bdbdd658da3eca0871d8169f67961c2cc0e747433f6bdc) — Live mint proof |
+| **🧾 Example Tx** | [paste a recent tx hash from the current contract] — Live mint proof |
 
 ---
 
@@ -158,7 +158,7 @@ The dungeon houses a fearsome dragon boss that creates **real economic stakes**:
   ┌─────────────────────────────────────────────────────┐
   │  Monad Testnet (Chain ID 10143)                      │
   │  MonadMeadow.sol — ERC-721 + Escrow Marketplace      │
-  │  0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f          │
+  │  0xe8B6c37f78475024a5d08DB3dF358983a45357A7          │
   │  Fully on-chain SVG metadata + Dragon economy        │
   └─────────────────────────────────────────────────────┘
 ```
@@ -214,7 +214,7 @@ forge script script/Deploy.s.sol:DeployScript \
   --broadcast
 ```
 
-> The contract at `0xd49c37f9...109d15f` is already deployed and verified. Only redeploy if you fork and modify it.
+> The contract at `0xe8B6c37f...a45357A7` is already deployed and verified. Only redeploy if you fork and modify it.
 
 ### Worker + Client (Cloudflare)
 

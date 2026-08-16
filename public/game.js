@@ -14,8 +14,8 @@ const KIND_COUNT = 5;
 const SEL = {
   mintItem: "0x3565a4ff", // mintItem(uint8)
   claimReward: "0x689f1623", // claimReward(uint8)
-  claimDragonBounty: "0x64d80eb1", // claimDragonBounty()
-  payDeathPenalty: "0xa9cc471f", // payDeathPenalty()
+  claimDragonBounty: "0x139b25b7", // claimDragonBounty()
+  payDeathPenalty: "0x9459ba03", // payDeathPenalty()
   list: "0x67d36903", // list(uint256,uint96)
   cancelListing: "0x305a67a8", // cancelListing(uint256)
   buy: "0xd96a094a", // buy(uint256)
@@ -1408,7 +1408,7 @@ async function handlePlayerDeath() {
   
   // Deduct 5 MON from player via blockchain
   try {
-    const h = await sendTx({ data: SEL.payDeathPenalty, value: BigInt(5 * 1e18) });
+    const h = await sendTx({ data: SEL.payDeathPenalty, value: 5n * 10n ** 18n }); // contract requires exactly 5 MON
     toastTx(`💀 Death Penalty Paid`, h);
     waitForReceipt(h).then(() => { refreshBalance(); });
   } catch (e) {
@@ -1827,7 +1827,7 @@ async function boot() {
   try {
     CFG = await (await fetch("/api/config")).json();
   } catch {
-    CFG = { contractAddress: "0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com", name: "Monad Testnet" };
+    CFG = { contractAddress: "0xe8B6c37f78475024a5d08DB3dF358983a45357A7", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com", name: "Monad Testnet" };
   }
   CHAIN_HEX = "0x" + Number(CFG.chainId).toString(16);
   if (CFG.name) $("netpill").textContent = CFG.name;

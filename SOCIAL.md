@@ -85,4 +85,4 @@ Tag on every post: **@monad @monad_dev @geeky_kartikey**
 3. **Onchain, for real:** ERC-721 with fully onchain SVG metadata — every crystal renders in any wallet, no IPFS. Screenshot of the token on MonadScan.
 4. **The marketplace:** escrow list/buy for MON, 2.5% treasury fee. GIF of a Buy.
 5. **The stack:** Cloudflare Durable Objects for real-time multiplayer + Foundry/OpenZeppelin contract on Monad testnet. Architecture snippet.
-6. **CTA:** "Grab testnet MON from the faucet, connect your wallet, and come wander. https://monad-meadow.lorq.workers.dev — verified contract: 0xd49c37f91bcdaa33aadc72cf46bfc5e25109d15f. @monad @monad_dev @geeky_kartikey"
+6. **CTA:** "Grab testnet MON from the faucet, connect your wallet, and come wander. https://monad-meadow.lorq.workers.dev — verified contract: 0xe8B6c37f78475024a5d08DB3dF358983a45357A7. @monad @monad_dev @geeky_kartikey"
