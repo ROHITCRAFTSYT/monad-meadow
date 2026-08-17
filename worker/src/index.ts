@@ -29,6 +29,31 @@ const MAX_CRYSTALS = 18;
 const SPAWN_MS = 4000;
 const KINDS = 5;
 
+// Crystal keep-out zones — must mirror the client world layout (public/game.js
+// buildWorld) so a gatherable crystal never lands in water or the walled dungeon.
+const TILE = 48;
+const GCOLS = Math.ceil(WORLD_W / TILE); // 50
+const GROWS = Math.ceil(WORLD_H / TILE); // 34
+const _midC = GCOLS >> 1, _midR = GROWS >> 1;
+const WATER = [
+  { cx: (_midC + 0.5) * TILE, cy: (_midR + 0.5) * TILE, rx: TILE * 1.15, ry: TILE * 0.9 }, // plaza fountain
+  { cx: (_midC + 9 + 0.5) * TILE, cy: (_midR + 6 + 0.5) * TILE, rx: TILE * 1.9, ry: TILE * 1.3 }, // ponds
+  { cx: (8 + 0.5) * TILE, cy: (6 + 0.5) * TILE, rx: TILE * 1.9, ry: TILE * 1.3 },
+  { cx: (GCOLS - 6 + 0.5) * TILE, cy: (GROWS - 5 + 0.5) * TILE, rx: TILE * 1.9, ry: TILE * 1.3 },
+];
+const DUNGEON = { x0: (GCOLS - 13) * TILE, y0: 2 * TILE, x1: (GCOLS - 3 + 1) * TILE, y1: (10 + 1) * TILE };
+
+function spawnable(x: number, y: number): boolean {
+  // keep crystals out of the walled dungeon arena (with a small margin)
+  if (x >= DUNGEON.x0 - 30 && x <= DUNGEON.x1 + 30 && y >= DUNGEON.y0 - 30 && y <= DUNGEON.y1 + 30) return false;
+  // and out of every pond / the fountain (1.3x margin so they don't touch the shore)
+  for (const w of WATER) {
+    const dx = (x - w.cx) / (w.rx * 1.3), dy = (y - w.cy) / (w.ry * 1.3);
+    if (dx * dx + dy * dy <= 1) return false;
+  }
+  return true;
+}
+
 // Abuse guards.
 const MAX_PLAYERS = 80; // per room / Durable Object
 const MAX_MSG_BYTES = 4096; // reject oversized inbound frames before parsing
@@ -225,12 +250,14 @@ export class WorldRoom {
   // --- crystal spawning ----------------------------------------------------
 
   private addCrystal() {
-    const c: Crystal = {
-      id: this.nextCrystalId++,
-      x: 120 + Math.random() * (WORLD_W - 240),
-      y: 120 + Math.random() * (WORLD_H - 240),
-      kind: Math.floor(Math.random() * KINDS),
-    };
+    // retry until the spot is in the open (not water, not the dungeon arena)
+    let x = 120 + Math.random() * (WORLD_W - 240);
+    let y = 120 + Math.random() * (WORLD_H - 240);
+    for (let t = 0; t < 40 && !spawnable(x, y); t++) {
+      x = 120 + Math.random() * (WORLD_W - 240);
+      y = 120 + Math.random() * (WORLD_H - 240);
+    }
+    const c: Crystal = { id: this.nextCrystalId++, x, y, kind: Math.floor(Math.random() * KINDS) };
     this.crystals.set(c.id, c);
     return c;
   }

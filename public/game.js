@@ -614,7 +614,8 @@ function buildWorld() {
   const pondSpots = [[midC + 9, midR + 6], [8, 6], [GCOLS - 6, GROWS - 5]];
   for (const [pc, pr] of pondSpots) {
     if (pc < 2 || pc > GCOLS - 3 || pr < 2 || pr > GROWS - 3) continue;
-    const x = (pc + 0.5) * TILE, y = (pr + 0.5) * TILE, rx = TILE * (1.4 + rnd()), ry = TILE * (1 + rnd() * 0.6);
+    // fixed sizes (deterministic) so the server's crystal keep-out matches exactly
+    const x = (pc + 0.5) * TILE, y = (pr + 0.5) * TILE, rx = TILE * 1.9, ry = TILE * 1.3;
     water.push({ x, y, rx, ry });
     colliders.push({ l: x - rx * 0.7, t: y - ry * 0.6, r: x + rx * 0.7, b: y + ry * 0.7 });
     for (let a = 0; a < 6; a++) { const c = pc + ((Math.cos(a) * 2) | 0), r = pr + ((Math.sin(a) * 1.6) | 0); if (isGrass(c, r) && rnd() < 0.5) place("town", T.bush, c, r, 34); }
@@ -664,11 +665,14 @@ function buildWorld() {
     place("dungeon", T.dFloorA, px, py, 28, "prop");
   }
 
-  // --- dungeon loot -------------------------------------------------------
-  for (let n = 0; n < 5; n++) {
-    const c = dungeon.c0 + 1 + ((rnd() * (dungeon.c1 - dungeon.c0 - 1)) | 0), r = dungeon.r0 + 1 + ((rnd() * (dungeon.r1 - dungeon.r0 - 1)) | 0);
-    place("dungeon", rnd() < 0.5 ? T.chest : T.barrel, c, r, 34, "prop");
-  }
+  // --- dungeon loot: a few props tucked into the corners, clear of the door,
+  //     the dragon, and the walking space -----------------------------------
+  const lootSpots = [
+    [dungeon.c1 - 1, dungeon.r0 + 1], // top-right corner
+    [dungeon.c1 - 1, dungeon.r1 - 1], // bottom-right corner
+    [dungeon.c0 + 2, dungeon.r1 - 1], // bottom-left, away from the door row
+  ];
+  for (const [c, r] of lootSpots) place("dungeon", (c + r) % 2 ? T.chest : T.barrel, c, r, 32, "prop");
 
   // --- dragon boss --------------------------------------------------------
   dungeonBounds = {
