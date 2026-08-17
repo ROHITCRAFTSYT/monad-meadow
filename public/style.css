@@ -266,6 +266,16 @@ kbd {
   padding: 8px 16px; border-radius: 999px; box-shadow: var(--shadow);
 }
 
+/* Idle auto-agent badge */
+.auto-badge {
+  top: 76px; left: 50%; transform: translateX(-50%);
+  background: rgba(75,157,134,0.96); color: #fff;
+  font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 999px;
+  box-shadow: var(--shadow); z-index: 20; pointer-events: none;
+  animation: autopulse 1.5s ease-in-out infinite;
+}
+@keyframes autopulse { 0%,100% { opacity: .82; } 50% { opacity: 1; } }
+
 /* Toast */
 .toast {
   position: fixed; top: 76px; left: 50%; transform: translateX(-50%) translateY(-8px);

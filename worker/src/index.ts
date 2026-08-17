@@ -29,6 +29,13 @@ const MAX_CRYSTALS = 18;
 const SPAWN_MS = 4000;
 const KINDS = 5;
 
+// Abuse guards.
+const MAX_PLAYERS = 80; // per room / Durable Object
+const MAX_MSG_BYTES = 4096; // reject oversized inbound frames before parsing
+// Simple per-connection token bucket: sustained ~30 msgs/sec with a burst of 60.
+const RATE_BURST = 60;
+const RATE_REFILL_PER_SEC = 30;
+
 interface Player {
   id: string;
   name: string;
@@ -61,7 +68,11 @@ export default {
 
     if (url.pathname === "/ws") {
       // Everyone shares one global meadow room. Swap the name for per-room worlds.
-      const roomName = url.searchParams.get("room") || "global-meadow";
+      // Sanitize the room code before it becomes a Durable Object name: cap the
+      // length and restrict to a safe charset so a client can't send a giant or
+      // exotic string as the DO name.
+      const rawRoom = url.searchParams.get("room") || "";
+      const roomName = rawRoom.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32) || "global-meadow";
       const id = env.WORLD_ROOM.idFromName(roomName);
       const stub = env.WORLD_ROOM.get(id);
       return stub.fetch(request);
@@ -75,6 +86,8 @@ export default {
 export class WorldRoom {
   private state: DurableObjectState;
   private players = new Map<WebSocket, Player>();
+  // Per-connection rate-limit state, kept out of Player so it never leaks to clients.
+  private meta = new Map<WebSocket, { tokens: number; last: number }>();
   private crystals = new Map<number, Crystal>();
   private nextCrystalId = 1;
   private spawning = false;
@@ -87,6 +100,12 @@ export class WorldRoom {
     const upgrade = request.headers.get("Upgrade");
     if (upgrade !== "websocket") {
       return new Response("expected websocket", { status: 426 });
+    }
+
+    // Cap the number of simultaneous connections a single room will hold so one
+    // abuser can't exhaust memory by opening unlimited sockets.
+    if (this.players.size >= MAX_PLAYERS) {
+      return new Response("room full", { status: 503 });
     }
 
     const pair = new WebSocketPair();
@@ -114,6 +133,7 @@ export class WorldRoom {
       facing: 0,
     };
     this.players.set(ws, player);
+    this.meta.set(ws, { tokens: RATE_BURST, last: Date.now() });
 
     // Tell the newcomer everything about the world.
     this.send(ws, {
@@ -136,19 +156,25 @@ export class WorldRoom {
   private onMessage(ws: WebSocket, evt: MessageEvent) {
     const me = this.players.get(ws);
     if (!me) return;
+    if (!this.allow(ws)) return; // per-connection rate limit
+    // Only accept reasonably-sized text frames; drop anything oversized/binary.
+    const data = evt.data;
+    if (typeof data !== "string" || data.length > MAX_MSG_BYTES) return;
     let msg: any;
     try {
-      msg = JSON.parse(typeof evt.data === "string" ? evt.data : "");
+      msg = JSON.parse(data);
     } catch {
       return;
     }
+    if (!msg || typeof msg !== "object") return;
 
     switch (msg.type) {
       case "move": {
         // Clamp to the world so nobody wanders off the meadow.
         me.x = clamp(Number(msg.x) || 0, 0, WORLD_W);
         me.y = clamp(Number(msg.y) || 0, 0, WORLD_H);
-        me.facing = Number(msg.facing) || 0;
+        const facing = Number(msg.facing);
+        me.facing = Number.isFinite(facing) ? facing : 0;
         this.broadcast({ type: "moved", id: me.id, x: me.x, y: me.y, facing: me.facing }, ws);
         break;
       }
@@ -178,7 +204,8 @@ export class WorldRoom {
       }
       case "celebrate": {
         // Broadcast a gentle confetti burst when someone mints/trades on-chain.
-        this.broadcast({ type: "celebrate", id: me.id, kind: Number(msg.kind) || 0 }, ws);
+        const kind = clamp(Math.floor(Number(msg.kind) || 0), 0, KINDS - 1);
+        this.broadcast({ type: "celebrate", id: me.id, kind }, ws);
         break;
       }
     }
@@ -188,6 +215,7 @@ export class WorldRoom {
     const me = this.players.get(ws);
     if (!me) return;
     this.players.delete(ws);
+    this.meta.delete(ws);
     this.broadcast({ type: "leave", id: me.id }, null);
     try {
       ws.close();
@@ -225,6 +253,20 @@ export class WorldRoom {
   }
 
   // --- helpers -------------------------------------------------------------
+
+  // Token-bucket rate limiter: returns false when a connection is over budget so
+  // the caller drops the message. Refills continuously up to RATE_BURST.
+  private allow(ws: WebSocket): boolean {
+    const m = this.meta.get(ws);
+    if (!m) return false;
+    const now = Date.now();
+    const elapsed = (now - m.last) / 1000;
+    m.last = now;
+    m.tokens = Math.min(RATE_BURST, m.tokens + elapsed * RATE_REFILL_PER_SEC);
+    if (m.tokens < 1) return false;
+    m.tokens -= 1;
+    return true;
+  }
 
   private send(ws: WebSocket, data: unknown) {
     try {

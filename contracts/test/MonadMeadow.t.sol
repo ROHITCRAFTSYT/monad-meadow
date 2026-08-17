@@ -161,6 +161,57 @@ contract MonadMeadowTest is Test {
         meadow.setFeeBps(1001);
     }
 
+    function test_OwnerCanSetFeeAndItAppliesOnBuy() public {
+        meadow.setFeeBps(500); // 5%
+        assertEq(meadow.feeBps(), 500);
+
+        vm.startPrank(alice);
+        meadow.mintItem{value: 0.01 ether}(0);
+        meadow.list(1, 1 ether);
+        vm.stopPrank();
+
+        uint256 sellerBefore = alice.balance;
+        vm.prank(bob);
+        meadow.buy{value: 1 ether}(1);
+
+        uint256 fee = (uint256(1 ether) * 500) / 10_000; // 0.05 ether
+        assertEq(alice.balance, sellerBefore + (1 ether - fee));
+        assertEq(meadow.treasury(), 0.01 ether + fee);
+    }
+
+    function test_OnlyOwnerCanSetFee() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        meadow.setFeeBps(100);
+    }
+
+    function test_WithdrawRejectsZeroAddress() public {
+        vm.prank(alice);
+        meadow.mintItem{value: 0.01 ether}(0);
+        vm.expectRevert(MonadMeadow.ZeroAddress.selector);
+        meadow.withdrawTreasury(address(0));
+    }
+
+    function test_WithdrawNeverExceedsTreasuryWhileEscrowHeld() public {
+        // Alice mints (0.01 to treasury) and lists; token is escrowed.
+        vm.startPrank(alice);
+        meadow.mintItem{value: 0.01 ether}(0);
+        meadow.list(1, 1 ether);
+        vm.stopPrank();
+
+        // Only the accounted treasury (the mint fee) may be withdrawn.
+        assertEq(meadow.treasury(), 0.01 ether);
+        uint256 before = bob.balance;
+        meadow.withdrawTreasury(bob);
+        assertEq(bob.balance, before + 0.01 ether);
+        assertEq(meadow.treasury(), 0);
+
+        // Escrowed NFT is still reclaimable by the seller afterwards.
+        vm.prank(alice);
+        meadow.cancelListing(1);
+        assertEq(meadow.ownerOf(1), alice);
+    }
+
     // --- Metadata --------------------------------------------------------
 
     function test_TokenURIReturnsOnchainData() public {

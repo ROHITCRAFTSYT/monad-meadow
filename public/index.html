@@ -96,8 +96,12 @@
     <div class="hud controls">
       <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
       <span><kbd>Space</kbd> gather</span>
+      <button id="autoBtn" class="mini" title="When idle, an agent auto-mines; toggle to also auto-mint">🤖 auto-mint: off</button>
       <button id="audioBtn" class="mini" title="Ambient sound">♪ off</button>
     </div>
+
+    <!-- Idle autonomous-agent indicator -->
+    <div id="autoBadge" class="hud auto-badge hidden">🤖 Auto-playing — the agent is mining. Move to take over.</div>
 
     <!-- Mobile touch controls (shown on small screens) -->
     <div class="hud touch-move" id="touchPad"><div class="stick" id="stick"></div></div>

@@ -13,6 +13,9 @@ import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 ///         (a MON micro-transaction) and trade them peer-to-peer for MON.
 /// @dev    Metadata + art are fully on-chain. Marketplace uses escrow so a listed
 ///         item can never be double-spent or transferred out from under a buyer.
+///         The contract only ever holds MON that is accounted in `treasury`
+///         (mint fees + sale fees) plus in-flight `msg.value` on a buy; there is
+///         no bare-MON receive path and no unbacked payout function.
 contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
     using Strings for uint256;
 
@@ -50,15 +53,6 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
     /// @notice accrued protocol funds (mint fees + sale fees) withdrawable by owner.
     uint256 public treasury;
 
-    /// @notice reward in MON (wei) for each crystal kind when gathered.
-    mapping(uint8 kind => uint256 reward) public rewardAmount;
-
-    /// @notice track claimed rewards to prevent double-claiming: player => (kind => timestamp of last claim)
-    mapping(address player => mapping(uint8 kind => uint256 lastClaimTime)) public lastRewardClaim;
-
-    /// @notice cooldown between claims of the same kind (in seconds).
-    uint256 public claimCooldown = 10;
-
     string[ITEM_KINDS] private _names = ["Dewdrop", "Sunbloom", "Moonpetal", "Emberseed", "Tidecrystal"];
     string[ITEM_KINDS] private _colors = ["#8fd3c7", "#ffd98e", "#c9b6ff", "#ff9d8a", "#8ec5ff"];
 
@@ -73,9 +67,6 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
     event MintPriceSet(uint8 indexed kind, uint256 price);
     event FeeSet(uint16 feeBps);
     event TreasuryWithdrawn(address indexed to, uint256 amount);
-    event RewardClaimed(address indexed player, uint8 indexed kind, uint256 amount);
-    event RewardAmountSet(uint8 indexed kind, uint256 amount);
-    event ClaimCooldownSet(uint256 cooldown);
 
     // ---------------------------------------------------------------------
     // Errors
@@ -90,9 +81,7 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
     error FeeTooHigh();
     error TransferFailed();
     error SelfBuy();
-    error RewardOnCooldown();
-    error InsufficientRewardFunds();
-    error ZeroRewardAmount();
+    error ZeroAddress();
 
     // ---------------------------------------------------------------------
     // Construction
@@ -105,13 +94,6 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
         mintPrice[2] = 0.03 ether;
         mintPrice[3] = 0.04 ether;
         mintPrice[4] = 0.05 ether;
-
-        // Default rewards: 0.005 -> 0.025 MON for gathering each crystal.
-        rewardAmount[0] = 0.005 ether;
-        rewardAmount[1] = 0.01 ether;
-        rewardAmount[2] = 0.015 ether;
-        rewardAmount[3] = 0.02 ether;
-        rewardAmount[4] = 0.025 ether;
     }
 
     // ---------------------------------------------------------------------
@@ -130,54 +112,6 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
 
         _safeMint(msg.sender, tokenId);
         emit ItemMinted(tokenId, msg.sender, kind, msg.value);
-    }
-
-    // ---------------------------------------------------------------------
-    // Rewards (direct MON transfer when gathering crystals)
-    // ---------------------------------------------------------------------
-
-    /// @notice Claim a reward in MON for gathering a crystal of this kind.
-    ///         Includes cooldown to prevent double-claiming the same kind rapidly.
-    function claimReward(uint8 kind) external nonReentrant {
-        if (kind >= ITEM_KINDS) revert BadKind();
-        uint256 reward = rewardAmount[kind];
-        if (reward == 0) revert ZeroRewardAmount();
-        
-        // Check cooldown
-        if (block.timestamp < lastRewardClaim[msg.sender][kind] + claimCooldown) {
-            revert RewardOnCooldown();
-        }
-
-        // Verify contract has funds
-        if (address(this).balance < reward) revert InsufficientRewardFunds();
-
-        // Record the claim
-        lastRewardClaim[msg.sender][kind] = block.timestamp;
-
-        // Send the reward
-        (bool ok,) = payable(msg.sender).call{value: reward}("");
-        if (!ok) revert TransferFailed();
-
-        emit RewardClaimed(msg.sender, kind, reward);
-    }
-
-    /// @notice Claim dragon bounty: 10 MON for defeating the dungeon dragon.
-    function claimDragonBounty() external nonReentrant {
-        require(address(this).balance >= 10 ether, "InsufficientRewardFunds");
-        
-        uint256 bounty = 10 ether;
-        (bool ok,) = payable(msg.sender).call{value: bounty}("");
-        if (!ok) revert TransferFailed();
-        
-        emit RewardClaimed(msg.sender, 99, bounty); // Kind 99 = dragon bounty
-    }
-
-    /// @notice Deduct death penalty: loses 5 MON for dying to the dragon.
-    ///         Player must send 5 MON to contract.
-    function payDeathPenalty() external payable nonReentrant {
-        if (msg.value != 5 ether) revert WrongPrice();
-        treasury += msg.value;
-        // No refund - penalty stays in treasury
     }
 
     // ---------------------------------------------------------------------
@@ -207,18 +141,22 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice Buy a listed token for MON. Pays the seller, routes the fee to treasury.
+    /// @dev    Checks-effects-interactions: listing is cleared and fee accrued before
+    ///         the NFT transfer and the seller payout. `nonReentrant` is belt-and-braces.
     function buy(uint256 tokenId) external payable nonReentrant {
         Listing memory l = listings[tokenId];
         if (l.seller == address(0)) revert NotListed();
         if (l.seller == msg.sender) revert SelfBuy();
         if (msg.value != l.price) revert WrongPrice();
 
+        // --- effects ---
         delete listings[tokenId];
 
         uint256 fee = (uint256(l.price) * feeBps) / 10_000;
         uint256 proceeds = l.price - fee;
         treasury += fee;
 
+        // --- interactions ---
         _transfer(address(this), msg.sender, tokenId);
 
         (bool ok,) = payable(l.seller).call{value: proceeds}("");
@@ -243,27 +181,17 @@ contract MonadMeadow is ERC721, Ownable, ReentrancyGuard {
         emit FeeSet(newFeeBps);
     }
 
-    function setRewardAmount(uint8 kind, uint256 amount) external onlyOwner {
-        if (kind >= ITEM_KINDS) revert BadKind();
-        rewardAmount[kind] = amount;
-        emit RewardAmountSet(kind, amount);
-    }
-
-    function setClaimCooldown(uint256 cooldown) external onlyOwner {
-        claimCooldown = cooldown;
-        emit ClaimCooldownSet(cooldown);
-    }
-
+    /// @notice Withdraw accrued protocol treasury. Can never send more than the
+    ///         accounted `treasury`; escrowed sale value and in-flight buys are
+    ///         untouched because they are never counted into `treasury`.
     function withdrawTreasury(address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
         uint256 amount = treasury;
         treasury = 0;
         (bool ok,) = payable(to).call{value: amount}("");
         if (!ok) revert TransferFailed();
         emit TreasuryWithdrawn(to, amount);
     }
-
-    /// @notice Deposit MON into the contract to fund future rewards.
-    receive() external payable {}
 
     // ---------------------------------------------------------------------
     // Views

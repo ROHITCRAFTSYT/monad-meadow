@@ -13,9 +13,6 @@ const KIND_COUNT = 5;
 // selectors (cast sig) — must match MonadMeadow.sol
 const SEL = {
   mintItem: "0x3565a4ff", // mintItem(uint8)
-  claimReward: "0x689f1623", // claimReward(uint8)
-  claimDragonBounty: "0x139b25b7", // claimDragonBounty()
-  payDeathPenalty: "0x9459ba03", // payDeathPenalty()
   list: "0x67d36903", // list(uint256,uint96)
   cancelListing: "0x305a67a8", // cancelListing(uint256)
   buy: "0xd96a094a", // buy(uint256)
@@ -233,7 +230,7 @@ async function sendTx({ data, value }) {
   await ensureChain();
   const tx = { from: wallet.addr, to: CFG.contractAddress, data };
   if (value !== undefined) tx.value = toHexWei(value);
-  setTxProcessStage(4, "Signature sent. Confirming transaction on Monad and waiting for receipt.");
+  // note: don't set a global stage here — each caller owns its own step
   return window.ethereum.request({ method: "eth_sendTransaction", params: [tx] });
 }
 function updateWalletUI() {
@@ -308,6 +305,28 @@ let nearestCrystal = null;
 let meMoving = false, meDir = 1;
 const touchVec = { x: 0, y: 0 }; // from the on-screen joystick (mobile)
 
+// --- idle auto-miner ("RL agent"): when the player is idle, an autonomous greedy
+//     policy takes over — navigate to the highest-value nearby crystal, gather it,
+//     and (optionally) mint it. Any real input hands control straight back. ---
+let lastInput = performance.now();
+let autoActive = false;      // agent currently driving the sprite
+let autoMint = false;        // also auto-mint gathered crystals (opt-in; each mint signs a tx)
+let autoTarget = null;       // current crystal the agent is walking to
+let autoMintPending = false; // a mint tx is in flight
+let lastAutoGather = 0, lastAutoMint = 0, _autoShown = false;
+const IDLE_MS = 6000;        // go autonomous after this many ms with no input
+function updateAutoBtn() {
+  const b = $("autoBtn");
+  if (b) { b.textContent = "🤖 auto-mint: " + (autoMint ? "on" : "off"); b.style.color = autoMint ? "var(--accent-deep)" : ""; }
+}
+function markInput() {
+  lastInput = performance.now();
+  if (autoActive) autoActive = false;
+}
+["keydown", "pointerdown", "touchstart", "wheel"].forEach((ev) =>
+  addEventListener(ev, markInput, { passive: true, capture: true })
+);
+
 // Dragon boss fight system
 let dragon = null; // {x, y, health, maxHealth, lastAttack, phase}
 let dungeonBounds = null; // {x0, y0, x1, y1} dungeon area
@@ -318,6 +337,19 @@ let dragonDefeated = false;
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
+// polyfill: some older engines lack ctx.roundRect (used by the trade overlay)
+if (!ctx.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    if (typeof r === "number") r = { tl: r, tr: r, br: r, bl: r };
+    else r = { tl: r[0] || 0, tr: r[0] || 0, br: r[0] || 0, bl: r[0] || 0 };
+    this.moveTo(x + r.tl, y);
+    this.arcTo(x + w, y, x + w, y + h, r.tr);
+    this.arcTo(x + w, y + h, x, y + h, r.br);
+    this.arcTo(x, y + h, x, y, r.bl);
+    this.arcTo(x, y, x + w, y, r.tl);
+    return this;
+  };
+}
 let DPR = Math.min(window.devicePixelRatio || 1, 2);
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -674,7 +706,9 @@ $("chatInput").addEventListener("focus", () => (typing = true));
 $("chatInput").addEventListener("blur", () => (typing = false));
 
 // Click/tap for dragon attacks
-addEventListener("click", () => {
+addEventListener("click", (e) => {
+  // ignore clicks on HUD/modal panels — only world clicks attack the dragon
+  if (e.target && e.target.closest && e.target.closest(".hud, .modal")) return;
   if (!me || !dragon || dragonDefeated || playerHealth <= 0) return;
   const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
                    me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
@@ -793,6 +827,40 @@ function blocked(x, y) {
   return false;
 }
 
+// greedy value-weighted policy: prefer crystals that are both valuable and close
+function pickAutoTarget() {
+  if (!me) return null;
+  let best = null, bestScore = -Infinity;
+  for (const c of crystals.values()) {
+    const d = Math.hypot(c.x - me.x, c.y - me.y);
+    const score = (KIND_VALUE[c.kind] || 0.01) / (1 + d / 220);
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+  return best;
+}
+async function maybeAutoMint(now) {
+  if (!autoMint || autoMintPending || !wallet.connected) return;
+  if (now - lastAutoMint < 1800) return;
+  const kind = satchel.findIndex((n) => n > 0);
+  if (kind < 0) return;
+  autoMintPending = true; lastAutoMint = now;
+  try {
+    const price = await readMintPrice(kind);
+    const h = await sendTx({ data: SEL.mintItem + encUint(kind), value: price });
+    satchel[kind] = Math.max(0, satchel[kind] - 1);
+    renderSatchel();
+    toastTx(`🤖 Auto-minted a ${KIND.names[kind]}`, h);
+    celebrate(kind);
+    waitForReceipt(h).then(() => { refreshBalance(); refreshMarket(); });
+  } catch (e) {
+    autoMint = false; // stop on rejection/error so we don't spam the wallet
+    updateAutoBtn();
+    toast("Auto-mint stopped: " + ((e && e.message) || "cancelled").slice(0, 60));
+  } finally {
+    autoMintPending = false;
+  }
+}
+
 function update(dt, now) {
   // tick the dynamic market prices
   tickMarketPrices(dt);
@@ -803,6 +871,19 @@ function update(dt, now) {
     if (keys["a"] || keys["arrowleft"]) dx -= 1;
     if (keys["d"] || keys["arrowright"]) dx += 1;
     dx += touchVec.x; dy += touchVec.y; // joystick
+    // idle -> hand the sprite to the autonomous agent
+    const modalOpen = !$("modal").classList.contains("hidden");
+    autoActive = !typing && !modalOpen && crystals.size > 0 && (now - lastInput > IDLE_MS);
+    if (autoActive) {
+      if (!autoTarget || !crystals.has(autoTarget.id)) autoTarget = pickAutoTarget();
+      if (autoTarget) {
+        const tdx = autoTarget.x - me.x, tdy = autoTarget.y - me.y, td = Math.hypot(tdx, tdy) || 1;
+        if (td < 78) {
+          if (now - lastAutoGather > 350) { lastAutoGather = now; tryGather(); autoTarget = null; }
+        } else { dx = tdx / td; dy = tdy / td; }
+      }
+      if (autoMint) maybeAutoMint(now);
+    }
     const mag = Math.hypot(dx, dy);
     meMoving = mag > 0.15;
     if (dx < -0.05) meDir = -1; else if (dx > 0.05) meDir = 1;
@@ -878,6 +959,12 @@ function update(dt, now) {
     const p = confetti[i];
     p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 220 * dt; p.life -= dt;
     if (p.life <= 0) confetti.splice(i, 1);
+  }
+  // show/hide the autonomous-agent badge only on state change
+  if (autoActive !== _autoShown) {
+    const b = $("autoBadge");
+    if (b) b.classList.toggle("hidden", !autoActive);
+    _autoShown = autoActive;
   }
 }
 
@@ -1359,19 +1446,6 @@ $("modalCancel").onclick = closeModal;
 $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 
 // ------------------------------------------------------------------ claim reward
-async function claimCrystalReward(kind) {
-  if (!wallet.connected) return; // Only claim if wallet is connected
-  try {
-    setTxProcessStage(2, "Sending the reward claim to Monad. Check your wallet and sign the transaction.");
-    const h = await sendTx({ data: SEL.claimReward + encUint(kind) });
-    toastTx(`Earned MON for gathering!`, h);
-    waitForReceipt(h).then(() => { refreshBalance(); });
-  } catch (e) {
-    // Silently fail if claim fails (e.g., on cooldown or insufficient funds)
-    console.log("Could not claim reward:", e.message);
-  }
-}
-
 // ------------------------------------------------------------------ dragon combat
 // Reward is a RARE crystal drop (no drainable on-chain payout). The player can
 // then choose to mint it — a normal, safe on-chain transaction they control.
@@ -1407,7 +1481,7 @@ async function openMintModal(kind) {
     async () => {
       $("modalConfirm").disabled = true;
       try {
-        setTxProcessStage(3, "Minting your crystal onchain. This creates the collectible and records it to your wallet.");
+        setTxProcessStage(2, "Minting your crystal onchain. This creates the collectible and records it to your wallet.");
         const h = await sendTx({ data: SEL.mintItem + encUint(kind), value: price });
         satchel[kind] = Math.max(0, satchel[kind] - 1);
         renderSatchel();
@@ -1444,7 +1518,7 @@ function openListModal(tokenId, kind) {
       if (price <= 0n) { toast("Enter a price above 0."); return; }
       $("modalConfirm").disabled = true;
       try {
-        setTxProcessStage(4, "Listing this crystal in the Meadow Market. The sale will be escrowed and visible to buyers.");
+        setTxProcessStage(3, "Listing this crystal in the Meadow Market. The sale will be escrowed and visible to buyers.");
         const h = await sendTx({ data: SEL.list + encUint(tokenId) + encUint(price) });
         closeModal();
         toastTx(`Listed ${KIND.names[kind]} #${tokenId}`, h);
@@ -1660,6 +1734,14 @@ function chime(freq) {
   o.connect(g); g.connect(actx.destination);
   o.start(); o.stop(actx.currentTime + 0.5);
 }
+$("autoBtn").onclick = async () => {
+  if (!autoMint && !wallet.connected) { await connectWallet(); if (!wallet.connected) return; }
+  autoMint = !autoMint;
+  updateAutoBtn();
+  toast(autoMint
+    ? "Auto-mint on — stand idle and the agent will mine & mint for you (each mint signs a tx)."
+    : "Auto-mint off. Idle still auto-gathers.", 4500);
+};
 $("audioBtn").onclick = () => {
   if (!actx) initAudio();
   audioOn = !audioOn;
@@ -1797,7 +1879,7 @@ async function boot() {
   try {
     CFG = await (await fetch("/api/config")).json();
   } catch {
-    CFG = { contractAddress: "0xe8B6c37f78475024a5d08DB3dF358983a45357A7", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com", name: "Monad Testnet" };
+    CFG = { contractAddress: "0xb1c49827eDB08AD2E34f002D962EB8B87B855296", rpc: "https://testnet-rpc.monad.xyz", chainId: 10143, explorer: "https://testnet.monadscan.com", name: "Monad Testnet" };
   }
   CHAIN_HEX = "0x" + Number(CFG.chainId).toString(16);
   if (CFG.name) $("netpill").textContent = CFG.name;
