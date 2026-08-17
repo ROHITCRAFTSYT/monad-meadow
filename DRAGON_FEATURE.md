@@ -2,16 +2,17 @@
 
 ## Overview
 
-Transformed Monad Meadow from a casual crystal-gathering game into a **high-stakes dungeon adventure** with a fearsome dragon boss that guards the dungeon, complete with real MON rewards and penalties.
+Transforms Monad Meadow from a casual crystal-gathering game into a **PvE dungeon adventure** with a fearsome dragon boss that guards the dungeon. The fight is **purely cosmetic/in-game** — there is **no MON at stake, no on-chain bounty, and no death penalty**. Defeating the dragon drops a rare **Tidecrystal** into your satchel, which you can then mint like any other crystal.
+
+> **Important:** Earlier drafts of this feature described a `claimDragonBounty()` reward and a `payDeathPenalty()` penalty. Those functions **do not exist** — they were removed from the contract as drainable-by-anyone security holes. The dragon fight touches no funds.
 
 ---
 
 ## 🎮 How to Play the Dragon Fight
 
 ### Before You Enter the Dungeon
-- Gather crystals and build up some MON in your wallet
-- Connect MetaMask (required for MON transfers)
 - Head to the **top-right corner** of the world map — that's the dungeon
+- No wallet or MON is required to fight; you only need a wallet later if you want to mint the crystal you win
 
 ### In the Dungeon
 1. **Walk into the dungeon** — You'll see the dragon spawn!
@@ -22,12 +23,12 @@ Transformed Monad Meadow from a casual crystal-gathering game into a **high-stak
    - You need ~17 hits to defeat it
 4. **Manage Your Health** — See your HP bar in the top-left corner
 5. **Victory or Defeat**:
-   - **Win**: Dragon defeated → Earn **10 MON** (blockchain transaction)
-   - **Lose**: Health reaches 0 → Lose **5 MON** (blockchain penalty)
+   - **Win**: Dragon defeated → a rare **Tidecrystal** drops into your satchel
+   - **Lose**: Health reaches 0 → you simply respawn at the meadow, nothing lost
 
 ### After Combat
-- If you win, you respawn at the meadow with your 10 MON reward
-- If you lose, you respawn at the meadow but lose 5 MON
+- If you win, you respawn at the meadow with a **Tidecrystal** in your satchel — mint it normally (`mintItem`) whenever you like
+- If you lose, you respawn at the meadow at full health with nothing lost
 - You can attempt the dragon fight again whenever you want!
 
 ---
@@ -51,32 +52,27 @@ Transformed Monad Meadow from a casual crystal-gathering game into a **high-stak
 
 ---
 
-## 💰 Economic Impact
+## 🎁 Reward: Rare Tidecrystal Drop
 
-### Dragon Victory Reward
-- **Amount**: 10 MON
-- **How**: Automatically transferred via `claimDragonBounty()` contract call
-- **Condition**: Only awarded if player defeats dragon
-- **Blockchain**: Visible on Monad Testnet explorer
+### How Victory Works
+- **Drop**: a rare **Tidecrystal** is added to the player's satchel
+- **Fully cosmetic / PvE** — no MON changes hands and no on-chain call happens at the moment of victory
+- **Minting is separate and optional** — the Tidecrystal behaves exactly like any gathered crystal: click it in your satchel to mint it as an ERC-721 via `mintItem(4)` (the Tidecrystal kind), paying only the normal mint price
 
-### Death Penalty
-- **Amount**: 5 MON
-- **How**: Player must pay via `payDeathPenalty()` contract call
-- **Condition**: Deducted when health reaches 0
-- **Blockchain**: Penalty fund goes to contract treasury
+### On Defeat
+- **No penalty.** Dying just triggers a respawn at the meadow.
+- There is no `payDeathPenalty()` and nothing is deducted — the contract has no penalty path at all.
 
-### Example Earnings
+### Example
 ```
 Scenario A (Win):
-  Before: 50 MON
   Fight dragon → Victory
-  After: 60 MON (+10 bounty)
+  Result: rare Tidecrystal added to satchel (mint it later if you want)
 
 Scenario B (Loss):
-  Before: 50 MON
   Fight dragon → Defeat
-  After: 45 MON (-5 penalty)
-  Can respawn and try again
+  Result: respawn at meadow, full health, nothing lost
+  Can immediately try again
 ```
 
 ---
@@ -91,7 +87,7 @@ Scenario B (Loss):
   - 🟢 Green (50-100 HP) — Safe
   - 🟡 Orange (25-50 HP) — Danger
   - 🔴 Red (0-25 HP) — Critical
-- **Death**: Health ≤ 0 triggers respawn and loss of 5 MON
+- **Death**: Health ≤ 0 triggers a respawn (no cost)
 
 ### Respawn System
 - Player respawns at meadow entrance (x:100, y:100)
@@ -103,24 +99,21 @@ Scenario B (Loss):
 
 ## ⚙️ Technical Implementation
 
-### Smart Contract Changes (`MonadMeadow.sol`)
+### Smart Contract (`MonadMeadow.sol`)
 
-#### New Functions
+The dragon fight adds **no contract functions**. It is entirely client/server-side. The Tidecrystal a player wins is minted (if they choose) through the ordinary, already-existing mint path:
+
 ```solidity
-// Claim 10 MON bounty for defeating dragon
-function claimDragonBounty() external nonReentrant
-
-// Pay 5 MON death penalty (player calls when health reaches 0)
-function payDeathPenalty() external payable nonReentrant
+// Standard mint — the ONLY payout-free way MON enters the contract.
+// A won Tidecrystal is minted exactly like any gathered crystal.
+function mintItem(uint8 kind) external payable
 ```
 
-#### Events
-- Dragon victories and deaths tracked on-chain
-- All MON transfers visible in wallet and explorer
+There are deliberately **no** `claimDragonBounty()` / `payDeathPenalty()` / `claimReward` functions — the hardened contract has no reward, bounty, or penalty logic, so nothing is drainable.
 
 ### Game Client Changes (`public/game.js`)
 
-#### New State Variables
+#### State Variables
 ```javascript
 let dragon = null;                    // Dragon entity
 let playerHealth = 100;               // Player HP
@@ -130,9 +123,9 @@ let dragonDefeated = false;           // Victory flag
 let dungeonBounds = null;             // Dungeon area
 ```
 
-#### New Functions
-- `handleDragonDefeat()` — Handles victory (10 MON reward)
-- `handlePlayerDeath()` — Handles defeat (5 MON penalty)
+#### Functions
+- `handleDragonDefeat()` — Handles victory (drops a rare Tidecrystal into the satchel)
+- `handlePlayerDeath()` — Handles defeat (respawn, no penalty)
 - `drawDragon()` — Renders dragon with health bar
 
 #### Combat System
@@ -141,11 +134,7 @@ let dungeonBounds = null;             // Dungeon area
 - **Click detection** — Players click to attack
 - **Health tracking** — Real-time health updates for both entities
 
-### New Contract Selectors
-```javascript
-claimDragonBounty: "0x64d80eb1"  // Claim victory reward
-payDeathPenalty: "0xa9cc471f"    // Pay death penalty
-```
+> No dragon-specific contract selectors exist. The won Tidecrystal is minted through the standard `mintItem` selector already used for every crystal.
 
 ---
 
@@ -172,20 +161,19 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 - Damage numbers in toast messages
 - "🐉 Dragon attacks! -5 HP"
 - "⚔️ Hit! Dragon -3 HP"
-- "💀 You died! You lost 5 MON!"
-- "🎉 DRAGON DEFEATED! You earned 10 MON!"
-- Confetti bursts on victory/defeat
+- "💀 You fell! Respawning..."
+- "🎉 DRAGON DEFEATED! A rare Tidecrystal drops into your satchel!"
+- Confetti bursts on victory
 
 ---
 
 ## 🎯 Gameplay Strategy
 
 ### Recommended Approach
-1. **Stock up on MON** — Get 20+ MON before attempting dragon
-2. **Sprint in** — Enter dungeon quickly to minimize damage
-3. **Attack spam** — Click rapidly to deal damage fast
-4. **Manage cooldowns** — Wait for dragon attack timer
-5. **Retreat if needed** — You can leave dungeon to heal (conceptually)
+1. **Sprint in** — Enter dungeon quickly to minimize damage
+2. **Attack spam** — Click rapidly to deal damage fast
+3. **Manage cooldowns** — Wait for dragon attack timer
+4. **Retreat if needed** — You can leave dungeon to heal (conceptually)
 
 ### Difficulty Levels
 | Skill | Strategy | Success Rate |
@@ -203,24 +191,18 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 
 ## 🚀 Next Steps
 
-### Immediate (Before Redeployment)
+### Immediate
 - [ ] Test dragon combat flow in game
-- [ ] Verify MON transfers work correctly
+- [ ] Verify the Tidecrystal drop lands in the satchel and mints correctly
 - [ ] Check health bar rendering
 - [ ] Test respawn mechanic
-
-### Before Mainnet
-- [ ] Redeploy contract to mainnet (chainId 143)
-- [ ] Update wrangler.jsonc with mainnet contract address
-- [ ] Verify dragon works on mainnet
-- [ ] Announce feature in social media
 
 ### Future Enhancements
 - [ ] Dragon difficulty scaling (more HP at higher levels)
 - [ ] Multiple dragon types (fire, ice, shadow)
 - [ ] Leaderboard (fastest dragon defeat)
 - [ ] Team dragon raid (multiplayer boss fight)
-- [ ] Dragon loot drops (rare crystals)
+- [ ] Additional rare cosmetic drops
 - [ ] Boss rush mode (defeat 3 dragons)
 
 ---
@@ -230,13 +212,13 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 | Metric | Value |
 |--------|-------|
 | Lines Added | ~400 |
-| New Contract Functions | 2 |
+| New Contract Functions | 0 (dragon is off-chain) |
 | New Game Functions | 3 |
 | New State Variables | 5 |
 | Dragon Sprite Complexity | Medium |
 | Visual Effects | 5+ |
-| Blockchain Transactions | 2 per fight |
-| MON at Stake | 5-15 per attempt |
+| On-chain Transactions | 0 during the fight (optional mint of the won Tidecrystal afterward) |
+| MON at Stake | None — purely cosmetic |
 
 ---
 
@@ -246,7 +228,7 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 - ✅ Dragon spawns correctly in dungeon
 - ✅ Damage system works as intended
 - ✅ Health bars render and update
-- ✅ MON transfers execute correctly
+- ✅ Tidecrystal drop lands in satchel on victory
 - ✅ Respawn system functions
 - ⚠️ No animation for dragon attacks (visual only)
 - ⚠️ No sound effects (can be added)
@@ -267,8 +249,8 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 1. **Show the dungeon** — Walk to top-right, show the dragon
 2. **Attack the dragon** — Click rapidly, show damage
 3. **Show health bars** — Both dragon and player HP
-4. **Victory moment** — Defeat dragon, show MON transaction
-5. **Blockchain proof** — Show balance increase on wallet
+4. **Victory moment** — Defeat dragon, show the Tidecrystal drop into the satchel
+5. **Optional mint** — Mint the won Tidecrystal on-chain and show the tx on MonadScan
 6. **Victory screen** — Show confetti and "DRAGON DEFEATED!"
 
 **Perfect demo length**: 30-45 seconds
@@ -277,21 +259,21 @@ payDeathPenalty: "0xa9cc471f"    // Pay death penalty
 
 ## 📝 Notes
 
-This feature **transforms the game's value proposition**:
+This feature **adds a gameplay goal without adding financial risk**:
 - **Before**: Casual crystal collection + trading
-- **After**: High-stakes PvE adventure with economic consequences
+- **After**: PvE adventure that rewards skill with a rare cosmetic Tidecrystal
 
-The dragon gives players a **meaningful goal** and creates **real gameplay tension** through MON at stake. It's perfect for a hackathon submission because:
+The dragon gives players a **meaningful goal** and creates **real gameplay tension** through health management — all without putting any MON at stake. It's a good fit for a hackathon submission because:
 1. ✅ Shows advanced game mechanics
-2. ✅ Demonstrates blockchain integration
+2. ✅ Cleanly separates fun (PvE) from funds (optional mint)
 3. ✅ Has visual polish (dragon sprite)
-4. ✅ Creates engagement (players want to win)
-5. ✅ Proves real MON transfers (not just cosmetic)
+4. ✅ Creates engagement (players want to win the rare drop)
+5. ✅ Keeps the contract safe — no unbacked payout paths
 
 ---
 
 ## 🎉 Enjoy the Adventure!
 
-Enter the dungeon, defeat the dragon, and claim your 10 MON victory bounty. This is the kind of gameplay that makes blockchain gaming exciting.
+Enter the dungeon, defeat the dragon, and claim your rare Tidecrystal. Mint it whenever you like — the fight itself costs you nothing.
 
 **May the odds be in your favor, warrior!** 🐉⚔️

@@ -13,12 +13,12 @@
 </p>
 
 <p align="center">
-  Explore a shared pixel-art world · Gather mystical crystals · Mint them as NFTs · Trade peer-to-peer on an escrow marketplace · Fight a dragon boss for real MON rewards
+  Explore a shared pixel-art world · Gather mystical crystals · Mint them as NFTs · Trade peer-to-peer on an escrow marketplace · Best a dragon boss for a rare Tidecrystal drop
 </p>
 
 <p align="center">
   <a href="https://monad-meadow.lorq.workers.dev"><strong>🎮 Play Now</strong></a> &nbsp;·&nbsp;
-  <a href="https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7"><strong>📜 Verified Contract</strong></a> &nbsp;·&nbsp;
+  <a href="https://testnet.monadscan.com/address/0xb1c49827eDB08AD2E34f002D962EB8B87B855296"><strong>📜 Verified Contract</strong></a> &nbsp;·&nbsp;
   <a href="#architecture"><strong>🏗️ Architecture</strong></a> &nbsp;·&nbsp;
   <a href="#getting-started"><strong>🚀 Getting Started</strong></a>
 </p>
@@ -56,10 +56,10 @@ The project demonstrates a scalable architecture for blockchain gaming by pairin
 | Component | Details |
 |:--|:--|
 | **🎮 Application** | [monad-meadow.lorq.workers.dev](https://monad-meadow.lorq.workers.dev) |
-| **📜 Smart Contract** | [`0xe8B6c37f...a45357A7`](https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7) — Verified on Monad Testnet |
+| **📜 Smart Contract** | [`0xb1c49827...855296`](https://testnet.monadscan.com/address/0xb1c49827eDB08AD2E34f002D962EB8B87B855296) — Hardened build, verified on MonadScan + MonadVision |
 | **🔗 Network** | Monad Testnet · Chain ID `10143` |
 | **☁️ Infrastructure** | Cloudflare Workers + Durable Objects |
-| **🧾 Example Tx** | [paste a recent tx hash from the current contract] — Live mint proof |
+| **🧾 Example Tx** | 0xb1a2f3b7c233956eb0cc260a0cce22bc5201086d7eec51bd3f2b86ebbc6541b9 — Live mint proof |
 
 ---
 
@@ -77,11 +77,17 @@ The project demonstrates a scalable architecture for blockchain gaming by pairin
 - **Escrow marketplace** — list, buy, and cancel with trustless on-chain settlement
 - **2.5% treasury fee** on marketplace trades — built-in revenue model
 
-### 🐉 Dragon Boss Fight
-- PvE combat with a dungeon dragon boss guarding real MON rewards
-- **Win** → claim 10 MON bounty via `claimDragonBounty()`
-- **Lose** → pay 5 MON penalty via `payDeathPenalty()`
+### 🐉 Dragon Boss Fight (Cosmetic PvE)
+- PvE combat with a dungeon dragon boss — purely in-game, no funds at stake
+- **Victory** → a rare **Tidecrystal** drops into your satchel, mintable like any crystal
+- **Defeat** → you simply respawn at the meadow and can retry
 - Real-time health bars, attack feedback, and respawn mechanics
+
+### 🤖 Idle Auto-Miner (Autonomous Agent)
+- After ~6 seconds of no input, an **RL-style autonomous agent** takes over your sprite
+- A greedy policy navigates to the highest value-weighted nearby crystal and gathers it
+- Optional **auto-mint** toggle mints gathered crystals automatically
+- Any keyboard, joystick, or tap input instantly hands control back to you
 
 ### 🎨 Fully On-Chain Art & Metadata
 - `tokenURI` returns base64-encoded JSON + SVG — no IPFS, no external hosting
@@ -107,8 +113,9 @@ The project demonstrates a scalable architecture for blockchain gaming by pairin
    - **List** a crystal at your chosen MON price (escrowed by the contract)
    - **Buy** a listed crystal (2.5% fee to treasury)
    - **Cancel** your listing anytime to reclaim your crystal
-7. **Fight the Dragon** — enter the dungeon in the top-right for a high-stakes boss encounter.
-8. **Chat & vibe** — say hello, toggle ambient audio, and enjoy the meadow.
+7. **Fight the Dragon** — enter the dungeon in the top-right for a PvE boss encounter. Win and a rare Tidecrystal drops into your satchel (mint it like any crystal); lose and you just respawn. No MON is ever at stake.
+8. **Go idle** — stop touching the controls for ~6 seconds and the built-in auto-miner takes over, walking to the best nearby crystal and gathering it. Toggle auto-mint to mint automatically. Any input returns control instantly.
+9. **Chat & vibe** — say hello, toggle ambient audio, and enjoy the meadow.
 
 > **💡 Tip:** You need testnet MON to mint or trade. See [Getting Testnet MON](#getting-testnet-mon) below.
 
@@ -116,7 +123,7 @@ The project demonstrates a scalable architecture for blockchain gaming by pairin
 
 ## 🐉 Dragon Boss Fight
 
-The dungeon houses a fearsome dragon boss that creates **real economic stakes**:
+The dungeon houses a fearsome dragon boss. It is a **cosmetic PvE encounter** — no MON is at stake, there is no on-chain bounty, and there is no death penalty:
 
 | Stat | Value |
 |:--|:--|
@@ -124,15 +131,15 @@ The dungeon houses a fearsome dragon boss that creates **real economic stakes**:
 | Dragon Attack | 5 HP/sec |
 | Player HP | 100 |
 | Player Attack | 3 damage/click |
-| Victory Reward | **+10 MON** (on-chain) |
-| Death Penalty | **−5 MON** (on-chain) |
+| Victory | **Rare Tidecrystal drop** into your satchel (mint it normally) |
+| Defeat | **Respawn** at the meadow — nothing lost |
 
 **How it works:**
 1. Enter the dungeon (top-right of the map)
 2. Click/tap rapidly to attack the dragon (~17 hits to defeat)
 3. Manage your health — the dragon deals continuous damage
-4. On **victory**: 10 MON is automatically transferred via smart contract
-5. On **defeat**: 5 MON penalty is paid to the treasury, then respawn and retry
+4. On **victory**: a rare Tidecrystal is added to your satchel; mint it like any other crystal via `mintItem`
+5. On **defeat**: you respawn at the meadow with full health and can retry immediately
 
 ---
 
@@ -158,8 +165,8 @@ The dungeon houses a fearsome dragon boss that creates **real economic stakes**:
   ┌─────────────────────────────────────────────────────┐
   │  Monad Testnet (Chain ID 10143)                      │
   │  MonadMeadow.sol — ERC-721 + Escrow Marketplace      │
-  │  0xe8B6c37f78475024a5d08DB3dF358983a45357A7          │
-  │  Fully on-chain SVG metadata + Dragon economy        │
+  │  0xb1c49827eDB08AD2E34f002D962EB8B87B855296          │
+  │  Fully on-chain SVG metadata · no unbacked payouts   │
   └─────────────────────────────────────────────────────┘
 ```
 
@@ -167,7 +174,7 @@ The dungeon houses a fearsome dragon boss that creates **real economic stakes**:
 |:--|:--|
 | **Client** (`public/`) | Vanilla-JS `<canvas>` game with zero dependencies. Draws the world from Kenney CC0 sprites, communicates with the Worker over WebSocket for multiplayer, and talks to Monad via raw JSON-RPC + `window.ethereum` for transactions. |
 | **Server** (`worker/`) | Cloudflare Durable Object `WorldRoom` — one authoritative room holding shared world state: connected players, positions, gatherable crystals, server-side proximity checks, chat, and celebration broadcasts. Never sees a private key. |
-| **Contract** (`contracts/`) | `MonadMeadow.sol` — the on-chain economy. Minting is a MON micro-transaction; the marketplace escrows listed tokens; dragon bounties and penalties are settled on-chain. Metadata and SVG art are generated entirely on-chain. |
+| **Contract** (`contracts/`) | `MonadMeadow.sol` — the hardened on-chain economy. Minting is a MON micro-transaction; the marketplace escrows listed tokens and settles trades peer-to-peer under a reentrancy guard. There are **no reward or payout functions** — the only inbound MON is a mint price or a buyer's payment, so there is no pool for anyone to drain. Metadata and SVG art are generated entirely on-chain. |
 
 ---
 
@@ -203,7 +210,7 @@ Install dependencies and run the test suite:
 cd contracts && forge soldeer install && forge test
 ```
 
-> **16 tests** in `contracts/test/MonadMeadow.t.sol` cover mint pricing, escrow list/buy, refunds/cancel, fee accounting, owner permissions, metadata, and dragon economy.
+> Tests in `contracts/test/MonadMeadow.t.sol` cover mint pricing, escrow list/buy, refunds/cancel, fee accounting, owner permissions, and on-chain metadata.
 
 Deploy to Monad Testnet:
 
@@ -214,7 +221,7 @@ forge script script/Deploy.s.sol:DeployScript \
   --broadcast
 ```
 
-> The contract at `0xe8B6c37f...a45357A7` is already deployed and verified. Only redeploy if you fork and modify it.
+> The hardened contract at `0xb1c49827...855296` is already deployed and verified. Only redeploy if you fork and modify it.
 
 ### Worker + Client (Cloudflare)
 
@@ -255,8 +262,8 @@ This project leverages the Monad blockchain for its entire on-chain economy:
 
 - **Monad Testnet** (Chain ID 10143) as the settlement layer for all item transactions
 - **NFT micro-transactions** — minting costs 0.01–0.05 MON per crystal type
-- **Escrow marketplace** — peer-to-peer trading with a 2.5% treasury fee
-- **Dragon bounties & penalties** — 10 MON rewards and 5 MON penalties settled on-chain
+- **Escrow marketplace** — peer-to-peer trading with a 2.5% treasury fee, settled under a reentrancy guard
+- **No unbacked payout paths** — the contract has no reward/bounty/penalty functions; the only inbound MON is a mint price or a buyer's escrowed payment, so there is nothing for an attacker to drain
 - **Fully on-chain SVG metadata** — `tokenURI` returns base64-encoded JSON with embedded SVG; no IPFS or external hosting required
 - **Gas-optimized custom errors** — `BadKind`, `WrongPrice`, `NotListed`, etc. instead of revert strings
 
@@ -264,7 +271,7 @@ This project leverages the Monad blockchain for its entire on-chain economy:
 
 ## 📜 Smart Contract API
 
-**Contract:** [`MonadMeadow.sol`](contracts/src/MonadMeadow.sol) · ERC-721 + Marketplace + Dragon Economy
+**Contract:** [`MonadMeadow.sol`](contracts/src/MonadMeadow.sol) · ERC-721 + Escrow Marketplace (hardened)
 
 | Function | Description | Cost |
 |:--|:--|:--|
@@ -272,13 +279,25 @@ This project leverages the Monad blockchain for its entire on-chain economy:
 | `list(uint256 tokenId, uint96 price)` | List an NFT on the marketplace (escrowed) | Gas only |
 | `buy(uint256 tokenId)` | Buy a listed NFT | Listed price + gas |
 | `cancelListing(uint256 tokenId)` | Cancel your listing and reclaim the NFT | Gas only |
-| `claimDragonBounty()` | Claim 10 MON for defeating the dragon | Gas only |
-| `payDeathPenalty()` | Pay 5 MON penalty on death | 5 MON + gas |
 | `withdrawTreasury(address)` | Withdraw accumulated fees (owner only) | Gas only |
 | `setMintPrice(uint8, uint256)` | Update mint price for a kind (owner only) | Gas only |
 | `setFeeBps(uint256)` | Update marketplace fee (owner only) | Gas only |
+| `tokenURI(uint256)` / `kindName(uint8)` | Read on-chain metadata / crystal name | View |
+
+Plus the standard **ERC-721** and **Ownable** surface. There are deliberately **no reward, bounty, or penalty functions** — earlier `claimReward` / `claimDragonBounty()` / `payDeathPenalty()` designs were removed because they were drainable-by-anyone holes.
 
 **Crystal Types:** Dewdrop · Sunbloom · Moonpetal · Emberseed · Tidecrystal
+
+---
+
+## 🔒 Security & Hardening
+
+The current contract is a redeployed, hardened build. The design goal is that **no MON can leave the contract except back to the party that put it in**:
+
+- **No unbacked payout paths.** The contract has no reward, bounty, or penalty functions. Every inbound MON is either a mint price or a buyer's escrowed payment. Removed `claimReward`, `claimDragonBounty()`, and `payDeathPenalty()` — each was a "drainable-by-anyone" hole.
+- **Escrowed marketplace with reentrancy guards.** Listed tokens are held by the contract; `buy` pays the seller and takes the 2.5% fee atomically, guarded against reentrancy (OpenZeppelin `ReentrancyGuard`).
+- **Owner controls only.** `withdrawTreasury`, `setMintPrice`, and `setFeeBps` are `Ownable`-gated.
+- **Rate-limited multiplayer server.** The Durable Object room applies per-connection rate limits, enforces a **per-room player cap**, and **sanitizes room codes** before use. The server never sees a private key.
 
 ---
 

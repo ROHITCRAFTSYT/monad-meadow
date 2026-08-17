@@ -4,9 +4,9 @@
   "network": "monad-testnet",
   "chainId": 10143,
   "contracts": {
-    "MonadMeadow": "0xe8B6c37f78475024a5d08DB3dF358983a45357A7"
+    "MonadMeadow": "0xb1c49827eDB08AD2E34f002D962EB8B87B855296"
   },
-  "explorer": "https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7",
+  "explorer": "https://testnet.monadscan.com/address/0xb1c49827eDB08AD2E34f002D962EB8B87B855296",
   "features": [
     "erc721",
     "onchain-marketplace",

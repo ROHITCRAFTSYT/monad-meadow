@@ -1,51 +1,45 @@
-# Monad Meadow Game - Reward System Deployment Guide
+# Monad Meadow — Deployment & Hardening Guide
 
-## Implementation Complete ✓
+## Status: Hardened contract deployed ✓
 
-The game has been updated with a **direct MON rewards system** where players automatically receive MON tokens directly in their wallet when picking up orbs—no more "you collected X MON" messages, but actual blockchain transfers!
+The game runs on a **redeployed, security-hardened** `MonadMeadow.sol`. An earlier design shipped reward/dragon-payout functions (`claimReward`, `claimDragonBounty()`, `payDeathPenalty()`) that were **drainable by anyone** — any caller could pull MON out of the contract. Those were **removed** and the contract was redeployed and re-verified.
 
-### What Changed
+> **There is no reward/gather-payout flow.** Gathering a crystal is cosmetic and adds it to your satchel. MON only moves when you **mint** a crystal (you pay a price) or **trade** on the escrowed marketplace (buyer pays seller, 2.5% fee to treasury).
 
-#### 1. **Smart Contract (MonadMeadow.sol)**
-- ✅ Added `claimReward(uint8 kind)` function that transfers MON directly to players
-- ✅ Reward amounts per crystal: 0.005 MON → 0.025 MON (mirrors the mint prices)
-- ✅ 10-second cooldown per crystal kind to prevent spam claiming
-- ✅ Contract can receive MON deposits via `receive()` function
-- ✅ Admin can set reward amounts and cooldown via `setRewardAmount()` and `setClaimCooldown()`
+### The current contract surface
 
-#### 2. **Game Client (public/game.js)**
-- ✅ When a player gathers an orb, they automatically receive MON in their wallet
-- ✅ Toast messages now show: "earning X MON + mint for Y MON"
-- ✅ Auto-calls `claimReward()` contract function (requires wallet connection)
-- ✅ Transaction visible on Monad Testnet explorer
-
-#### 3. **Architecture Flow**
+```solidity
+mintItem(uint8 kind) payable        // mint a crystal NFT (0.01–0.05 MON)
+list(uint256 tokenId, uint96 price) // list an owned NFT (escrowed)
+cancelListing(uint256 tokenId)      // reclaim a listed NFT
+buy(uint256 tokenId) payable        // buy a listed NFT (reentrancy-guarded)
+setMintPrice(uint8, uint256)        // owner only
+setFeeBps(uint256)                  // owner only
+withdrawTreasury(address)           // owner only
+tokenURI(uint256) / kindName(uint8) // on-chain metadata
+// + standard ERC-721 and Ownable
 ```
-1. Player presses Space → server validates proximity
-2. Server sends "gathered" message to client
-3. Client auto-calls claimReward() on contract
-4. Contract transfers MON to player's wallet address
-5. Transaction visible on blockchain
-6. Player can also mint the NFT for additional cost
-```
+
+**No `receive()` reward pool, no bounty, no penalty.** The only way MON enters the contract is a mint price or a buyer's escrowed payment, so there is nothing for an attacker to drain.
 
 ## Deployment Steps
 
-### Step 1: Deploy Updated Contract
-Use your private key to deploy the updated contract:
+### Step 1: Deploy the contract
 
 ```bash
 cd contracts
-forge script script/Deploy.s.sol \
+forge test        # sanity: all tests passing
+forge script script/Deploy.s.sol:DeployScript \
   --rpc-url https://testnet-rpc.monad.xyz \
   --broadcast \
-  --private-key YOUR_PRIVATE_KEY_HERE
+  --private-key 0xYOUR_PRIVATE_KEY_HERE
 ```
 
-Replace `YOUR_PRIVATE_KEY_HERE` with your private key (64 hex characters, including 0x prefix).
+Replace `0xYOUR_PRIVATE_KEY_HERE` with your deployer key (64 hex chars, `0x`-prefixed). Never commit this key.
 
-### Step 2: Update Worker Config
-After deployment, update the contract address in `worker/wrangler.jsonc`:
+### Step 2: Update Worker config
+
+After deployment, set the contract address in `worker/wrangler.jsonc`:
 
 ```jsonc
 "vars": {
@@ -53,23 +47,13 @@ After deployment, update the contract address in `worker/wrangler.jsonc`:
 }
 ```
 
-### Step 3: Fund Contract with MON
-Send MON to the deployed contract address to fund the reward pool. For testing:
-- Send at least 0.5 MON to the contract address
-- This allows ~20+ players to gather and claim rewards
+> No reward-pool funding step is needed — the contract holds no payout pool. It only ever holds escrowed listings and accrued treasury fees, which the owner withdraws via `withdrawTreasury`.
 
-Example using web3.py or ethers.js:
-```javascript
-const tx = await signer.sendTransaction({
-  to: "0xYOUR_CONTRACT_ADDRESS",
-  value: ethers.utils.parseEther("0.5") // 0.5 MON
-});
-```
+### Step 3: Deploy the Worker
 
-### Step 4: Deploy Worker
 ```bash
 cd worker
-wrangler deploy
+npx wrangler deploy
 ```
 
 ## Testing Locally
@@ -77,60 +61,43 @@ wrangler deploy
 1. **Start the worker locally:**
    ```bash
    cd worker
-   wrangler dev
+   npx wrangler dev
    ```
 
 2. **Connect your wallet** (MetaMask with Monad Testnet configured)
 
-3. **Walk up to a crystal and press Space**
+3. **Walk up to a crystal and press Space** — it drops into your satchel (cosmetic, no transaction)
 
-4. **Observe:**
-   - ✓ Toast shows reward amount (e.g., "earning 0.01 MON")
-   - ✓ Transaction appears in the UI
-   - ✓ Your wallet balance increases by the reward amount
+4. **Click the satchel crystal to mint** and observe:
+   - ✓ MetaMask prompts for the mint price (0.01–0.05 MON)
+   - ✓ Confetti fires on the confirmed mint
+   - ✓ The minted token renders from on-chain SVG metadata
    - ✓ Transaction visible on https://testnet.monadscan.com
 
-## Contract ABI Update
+5. **Open the Meadow Market** to list/buy and confirm MON moves peer-to-peer.
 
-The new selector added to game.js:
-```javascript
-claimReward: "0x0fc14592" // claimReward(uint8)
-```
+## Contract selectors in the client
 
-This is auto-called when gathering crystals if wallet is connected.
+`public/game.js` uses hardcoded 4-byte selectors for `mintItem`, `list`, `cancelListing`, and `buy`. There are **no** `claimReward` / `claimDragonBounty` / `payDeathPenalty` selectors — those functions do not exist on the contract. The dragon's Tidecrystal reward is minted through the ordinary `mintItem` path.
 
-## Reward Amounts (Configurable)
+## Security notes
 
-Per crystal kind in MON:
-- Dewdrop: 0.005 MON
-- Sunbloom: 0.01 MON
-- Moonpetal: 0.015 MON
-- Emberseed: 0.02 MON
-- Tidecrystal: 0.025 MON
-
-Change via: `contract.setRewardAmount(kind, newAmount)`
-
-## Cooldown System
-
-- 10 seconds between claims of the same crystal kind per player
-- Prevents double-claiming and spam
-- Change via: `contract.setClaimCooldown(newCooldown)`
-
-## Hackathon Rubric
-
-✅ **Wins hackathon requirements:**
-- Actual blockchain transactions when gathering
-- Real MON transfers to player wallets (mainnet or testnet)
-- Not just UI messages—genuine wallet balance changes
-- Automatic without manual steps
-- Transaction-verified on Monad chain
+- **No unbacked payout paths** — mint + escrowed marketplace only.
+- **Reentrancy guards** on marketplace settlement (OpenZeppelin `ReentrancyGuard`).
+- **Owner-gated admin** — `setMintPrice`, `setFeeBps`, `withdrawTreasury` are `Ownable`.
+- **Rate-limited multiplayer server** — the `WorldRoom` Durable Object applies per-connection rate limits, a per-room player cap, and sanitizes room codes. It never sees a private key.
+- **No secrets in the repo** — deployer keys live in gitignored `contracts/cache/` / local env only; `.env.example` is the safe template.
 
 ## Troubleshooting
 
-**"Reward on cooldown" error:** Wait 10 seconds before claiming the same kind again
+**Mint reverts with `WrongPrice`:** send exactly the configured mint price for that kind (`setMintPrice` controls it).
 
-**"Insufficient reward funds":** Send more MON to the contract
+**Mint reverts with `BadKind`:** `kind` must be 0–4 (Dewdrop, Sunbloom, Moonpetal, Emberseed, Tidecrystal).
 
-**Transaction fails silently:** Check wallet is connected and contract has MON balance
+**Buy reverts with `NotListed`:** the token is not currently listed, or was already bought/cancelled.
 
-**Contract address in game is wrong:** Update `CONTRACT_ADDRESS` in `worker/wrangler.jsonc` and redeploy
+**Contract address in game is wrong:** update `CONTRACT_ADDRESS` in `worker/wrangler.jsonc` and redeploy the Worker.
+
+## Mainnet
+
+Mainnet is **not** deployed. The app runs on Monad **testnet** (chainId 10143). To move to mainnet later, see `MAINNET.md` — it needs a wallet funded with real MON.

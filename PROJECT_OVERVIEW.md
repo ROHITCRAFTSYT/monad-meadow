@@ -41,7 +41,7 @@ Players gather glowing crystals → mint them as ERC-721 NFTs → trade them pee
 │  • ERC-721 NFT minting                                      │
 │  • Escrow marketplace (list/buy/cancel)                     │
 │  • On-chain SVG metadata                                    │
-│  • Contract: 0xe8B6c37f78475024a5d08DB3dF358983a45357A7    │
+│  • Contract: 0xb1c49827eDB08AD2E34f002D962EB8B87B855296    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,89 +83,64 @@ Players gather glowing crystals → mint them as ERC-721 NFTs → trade them pee
 
 ---
 
-## 🆕 What I Just Implemented (This Session) — REWARD SYSTEM ⭐
+## 🆕 What Changed (Latest Session) — HARDENING + NEW FEATURES ⭐
 
-### Major Addition: **Direct MON Rewards When Gathering**
+### 1. Contract redeployed as a hardened, security-audited build
 
-Previously, gathering a crystal just added it to your satchel. **Now it transfers real MON directly to your wallet!**
+An earlier design had reward/dragon payout functions that were **drainable by anyone** — any caller could pull MON out of the contract's balance. These were **removed entirely** and the contract was **redeployed**:
 
-#### Changes Made:
-
-**1. Smart Contract Updates (MonadMeadow.sol)**
 ```solidity
-✅ claimReward(uint8 kind) - Transfers MON to player wallet
-✅ rewardAmount[kind] - Rewards per crystal: 0.005-0.025 MON
-✅ lastRewardClaim[player][kind] - Prevents double-claiming
-✅ claimCooldown - 10-second cooldown between claims
-✅ setRewardAmount() - Admin can adjust rewards
-✅ setClaimCooldown() - Admin can adjust cooldown
-✅ receive() - Contract accepts MON deposits
+❌ REMOVED  claimReward(uint8 kind)     // was drainable-by-anyone
+❌ REMOVED  claimDragonBounty()          // was drainable-by-anyone
+❌ REMOVED  payDeathPenalty()            // no penalty logic anymore
+
+✅ mintItem(uint8 kind) payable          // the ONLY way MON enters (a price)
+✅ list / cancelListing / buy            // escrowed marketplace, reentrancy-guarded
+✅ setMintPrice / setFeeBps / withdrawTreasury   // Ownable-gated
+✅ tokenURI / kindName + ERC-721/Ownable
 ```
 
-**2. Game Client Updates (public/game.js)**
-```javascript
-✅ Added claimReward selector (0x689f1623)
-✅ Auto-calls claimReward() when gathering
-✅ Shows reward amounts in messages
-✅ Updates wallet balance on receipt
-```
+The result: **no unbacked payout paths**. Every inbound MON is a mint price or a buyer's escrowed payment, so there is no pool for an attacker to drain. Deployed + verified on MonadScan + MonadVision.
 
-**3. Deployment & Funding**
-```
-✅ New contract deployed: 0xe8B6c37f78475024a5d08DB3dF358983a45357A7
-✅ Funded with 0.5 MON for rewards pool
-✅ Worker config updated with new address
-✅ Function selector corrected (was wrong, now correct)
-```
+### 2. Gathering is cosmetic (no auto-payout)
 
-**4. Security Hardening**
-```
-✅ Private key verification (NOT in git history)
-✅ Updated .gitignore to protect secrets
-✅ Created .env.example template
-✅ Broadcast files excluded from git
-```
+Gathering a crystal adds it to your satchel. It does **not** transfer MON to your wallet — the old "gather = MON reward" flow was part of the drainable `claimReward` path and is gone. You put value on-chain when you **mint** a gathered crystal, and you earn MON by **selling** on the marketplace.
+
+### 3. Dragon boss is cosmetic PvE
+
+Defeating the dungeon dragon drops a rare **Tidecrystal** into your satchel (mint it normally, like any crystal). There is **no on-chain bounty** and **no death penalty** — dying just respawns you. See `DRAGON_FEATURE.md`.
+
+### 4. Idle auto-miner (RL-style autonomous agent)
+
+After ~6 seconds of no input, an autonomous greedy policy takes over the sprite: it navigates to the highest value-weighted nearby crystal and gathers it. An optional **auto-mint** toggle also mints gathered crystals. Any keyboard/joystick/tap input hands control straight back to the player.
+
+### 5. Server hardening
+
+The `WorldRoom` Durable Object is **rate-limited**, enforces a **per-room player cap**, and **sanitizes room codes** before use.
 
 ---
 
-## 🎯 Reward System Flow
+## 📊 Crystal Mint Prices (Per Crystal)
 
-```
-1. Player gathers crystal
-   ↓
-2. Server sends "gathered" message
-   ↓
-3. Client auto-calls claimReward() on contract
-   ↓
-4. Contract transfers MON to player's wallet
-   ↓
-5. Toast shows: "earning 0.01 MON + mint for 0.02 MON"
-   ↓
-6. Player sees wallet balance increase ✓
-   ↓
-7. Player can ALSO mint the NFT for additional cost
-```
+| Crystal | Mint Cost |
+|---------|-----------|
+| Dewdrop | 0.01 MON |
+| Sunbloom | 0.02 MON |
+| Moonpetal | 0.03 MON |
+| Emberseed | 0.04 MON |
+| Tidecrystal | 0.05 MON |
 
----
-
-## 📊 Reward Amounts (Per Crystal)
-
-| Crystal | Gather Reward | Mint Cost | Total Value |
-|---------|---------------|-----------|-------------|
-| Dewdrop | 0.005 MON | 0.01 MON | 0.015 MON |
-| Sunbloom | 0.01 MON | 0.02 MON | 0.03 MON |
-| Moonpetal | 0.015 MON | 0.03 MON | 0.045 MON |
-| Emberseed | 0.02 MON | 0.04 MON | 0.06 MON |
-| Tidecrystal | 0.025 MON | 0.05 MON | 0.075 MON |
+> Gathering is free/cosmetic; you only spend MON when you choose to mint, and the marketplace is where MON actually changes hands (buyer pays seller, 2.5% fee to treasury).
 
 ---
 
 ## 🔐 Security Done Right
 
-✅ **Private key NEVER in codebase**
-✅ **Broadcast/cache files git-ignored**
-✅ **Environment variables protected**
-✅ **.env.example as safe template**
+✅ **No unbacked payout paths in the contract** (only mint + escrowed marketplace)
+✅ **Reentrancy guards on marketplace settlement**
+✅ **Rate-limited multiplayer server with per-room caps + sanitized room codes**
+✅ **Private key NEVER in codebase** (broadcast/cache files git-ignored)
+✅ **Environment variables protected** (`.env.example` as safe template)
 ✅ **Verified with grep searches**
 
 ---
@@ -184,11 +159,11 @@ Previously, gathering a crystal just added it to your satchel. **Now it transfer
 - [x] Real live transactions
 - [x] README for self-deployment
 
-### 🆕 **Advanced - Real Blockchain Impact** (NEW!)
-- [x] Gathering = actual MON transfer to wallet
-- [x] Not just UI messages, real balance changes
-- [x] Blockchain-verified rewards
-- [x] **Meets hackathon requirement for real transactions**
+### 🆕 **Advanced - Real Blockchain Impact**
+- [x] Minting a crystal = a real ERC-721 mint transaction on Monad
+- [x] Marketplace buy/sell = real MON transfers, escrow-settled on-chain
+- [x] Balances and market counts read live from chain
+- [x] **Meets hackathon requirement for real transactions** — without any drainable payout path
 
 ### ⏳ Advanced - Virality (100/100)
 - Pending: Post on X/LinkedIn
@@ -208,7 +183,7 @@ Previously, gathering a crystal just added it to your satchel. **Now it transfer
 monad-meadow/
 ├── contracts/              # Solidity smart contract
 │   ├── src/
-│   │   └── MonadMeadow.sol # ERC-721 + marketplace + rewards
+│   │   └── MonadMeadow.sol # ERC-721 + escrow marketplace (hardened)
 │   ├── test/
 │   │   └── MonadMeadow.t.sol # 16 tests (all passing)
 │   └── script/
@@ -225,26 +200,25 @@ monad-meadow/
 ├── README.md              # Main docs
 ├── STATUS.md              # Build status
 ├── MAINNET.md             # Mainnet deployment guide
-└── DEPLOYMENT_GUIDE.md    # Reward system guide
+└── DEPLOYMENT_GUIDE.md    # Deploy + hardening guide
 ```
 
 ---
 
 ## 💡 How This Wins the Hackathon
 
-### Before (Previous Sessions)
-- Players gather crystals → UI says "you got X MON"
-- Players mint NFTs → real blockchain transaction
-- Players trade → real blockchain transaction
+### The loop
+- Players gather crystals → added to the satchel (cosmetic, free)
+- Players mint crystals → real ERC-721 mint transaction on Monad
+- Players trade → real MON transfers, escrow-settled on-chain
+- Players best the dragon → a rare cosmetic Tidecrystal drop (mint it if they want)
 
-### After (This Session) 🎉
-- Players gather crystals → **REAL MON appears in wallet**
-- Contract tracks rewards
-- Automatic claim with 10-second cooldown
-- Verified on blockchain explorer
+### Why it holds up
+- **Real blockchain impact** through mint + marketplace transactions, verified on the explorer
+- **No drainable payout paths** — the hardened contract can only receive a mint price or a buyer's escrowed payment
+- **Safe by construction** rather than relying on funding a reward pool
 
-**This solves the core hackathon requirement:** 
-> "Show real blockchain impact — not just UI messages, but actual wallet balance changes"
+**This meets the core hackathon requirement** — real, explorer-verifiable on-chain activity — without exposing the contract to a drain.
 
 ---
 
@@ -252,7 +226,7 @@ monad-meadow/
 
 1. **Post on socials** (up to 100 points)
    - Tag @monad, @monad_dev, @geeky_kartikey
-   - Record 30s+ demo showing rewards flowing
+   - Record 30s+ demo showing a mint + a marketplace trade
    - Aim for 5K+ views
 
 2. **Deploy to mainnet** (+25 bonus)
@@ -269,18 +243,20 @@ monad-meadow/
 1. Go to https://monad-meadow.lorq.workers.dev
 2. Create/join a room
 3. Walk around with WASD
-4. Press Space near crystals to gather
+4. Press Space near crystals to gather (or go idle and let the auto-miner do it)
 5. Connect wallet (MetaMask on Monad Testnet)
-6. See MON appear in your wallet! ✨
-7. Optional: Mint the NFT or trade on market
+6. Click a gathered crystal to mint it on-chain ✨
+7. Optional: List/buy on the Meadow Market, or fight the dragon for a rare Tidecrystal
 
 ---
 
 ## 📞 Current Status
 
-✅ **Contract deployed & funded**: 0xe8B6c37f78475024a5d08DB3dF358983a45357A7
-✅ **Rewards system live**: Players get MON when gathering
+✅ **Hardened contract deployed & verified**: 0xb1c49827eDB08AD2E34f002D962EB8B87B855296
+✅ **No unbacked payout paths**: only mint + escrowed marketplace, reentrancy-guarded
+✅ **Cosmetic dragon + idle auto-miner** live
+✅ **Server rate-limited** with per-room caps + sanitized room codes
 ✅ **All code pushed to GitHub**: Secure, no secrets leaked
 ✅ **Ready for demo & hackathon submission**
 
-**Total Lines Added This Session:** ~220 lines of Solidity + 40 lines of JavaScript + security hardening
+> Note: mainnet is **not** deployed — the project runs on Monad testnet (chainId 10143). See `MAINNET.md` for the optional mainnet path.

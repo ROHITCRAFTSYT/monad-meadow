@@ -314,6 +314,7 @@ let autoMint = false;        // also auto-mint gathered crystals (opt-in; each m
 let autoTarget = null;       // current crystal the agent is walking to
 let autoMintPending = false; // a mint tx is in flight
 let lastAutoGather = 0, lastAutoMint = 0, _autoShown = false;
+let autoStuckMs = 0, autoPrevX = 0, autoPrevY = 0, autoAvoid = -1, autoAvoidUntil = 0;
 const IDLE_MS = 6000;        // go autonomous after this many ms with no input
 function updateAutoBtn() {
   const b = $("autoBtn");
@@ -511,13 +512,14 @@ function buildWorld() {
   const pen = rectOf(farm.c0 + 9, farm.r0 + 1, farm.c1, farm.r0 + 4); // animal pen inside farm
   const forest = rectOf(2, 2, midC - 7, 9);                   // grove, top-left
 
-  // roads: a main cross through the plaza, plus branches to farm & dungeon
+  // roads: a main cross through the plaza, plus branches to farm & a wide dungeon approach
+  const doorRow = (dungeon.r0 + dungeon.r1) >> 1; // the dungeon doorway sits mid-left wall
   const isRoad = (c, r) =>
-    (Math.abs(r - midR) <= 0 && !inR(c, r, plaza)) ||               // horizontal avenue
-    (Math.abs(c - midC) <= 0 && !inR(c, r, plaza)) ||               // vertical avenue
-    (c === farm.c0 + 5 && r > farm.r0 - 3 && r <= midR) ||          // plaza -> farm
-    (r === dungeon.r1 + 1 && c >= midC && c <= dungeon.c0 + 2) ||   // plaza -> dungeon
-    (c === dungeon.c0 - 3 && r >= dungeon.r1 + 1 && r <= 3 + dungeon.r1); // short spur
+    (r === midR && !inR(c, r, plaza)) ||                                            // horizontal avenue
+    (c === midC && !inR(c, r, plaza)) ||                                            // vertical avenue
+    (c === farm.c0 + 5 && r > farm.r0 - 3 && r <= midR) ||                          // plaza -> farm
+    (r >= doorRow - 1 && r <= doorRow + 1 && c >= dungeon.c0 - 4 && c < dungeon.c0) || // wide apron in front of the door
+    (c >= dungeon.c0 - 3 && c <= dungeon.c0 - 2 && r >= doorRow && r <= midR);       // connector down to the avenue
 
   // --- ground --------------------------------------------------------------
   for (let r = 0; r < GROWS; r++) {
@@ -526,7 +528,7 @@ function buildWorld() {
       if (inR(c, r, dungeon)) {
         dungeonMask[i] = true;
         const wall = c === dungeon.c0 || c === dungeon.c1 || r === dungeon.r0 || r === dungeon.r1;
-        const door = c === dungeon.c0 && r === ((dungeon.r0 + dungeon.r1) >> 1);
+        const door = c === dungeon.c0 && Math.abs(r - doorRow) <= 1; // 3-cell-wide opening
         if (wall && !door) {
           ground[i] = { sheet: "dungeon", idx: rnd() < 0.5 ? T.dWall : T.dWallA };
           colliders.push({ l: c * TILE + 2, t: r * TILE + 2, r: c * TILE + TILE - 2, b: r * TILE + TILE - 2 });
@@ -830,8 +832,10 @@ function blocked(x, y) {
 // greedy value-weighted policy: prefer crystals that are both valuable and close
 function pickAutoTarget() {
   if (!me) return null;
+  const avoiding = performance.now() < autoAvoidUntil ? autoAvoid : -1;
   let best = null, bestScore = -Infinity;
   for (const c of crystals.values()) {
+    if (c.id === avoiding) continue; // recently unreachable — skip for a bit
     const d = Math.hypot(c.x - me.x, c.y - me.y);
     const score = (KIND_VALUE[c.kind] || 0.01) / (1 + d / 220);
     if (score > bestScore) { bestScore = score; best = c; }
@@ -875,13 +879,20 @@ function update(dt, now) {
     const modalOpen = !$("modal").classList.contains("hidden");
     autoActive = !typing && !modalOpen && crystals.size > 0 && (now - lastInput > IDLE_MS);
     if (autoActive) {
-      if (!autoTarget || !crystals.has(autoTarget.id)) autoTarget = pickAutoTarget();
+      if (!autoTarget || !crystals.has(autoTarget.id)) { autoTarget = pickAutoTarget(); autoStuckMs = 0; }
       if (autoTarget) {
         const tdx = autoTarget.x - me.x, tdy = autoTarget.y - me.y, td = Math.hypot(tdx, tdy) || 1;
         if (td < 78) {
-          if (now - lastAutoGather > 350) { lastAutoGather = now; tryGather(); autoTarget = null; }
-        } else { dx = tdx / td; dy = tdy / td; }
+          if (now - lastAutoGather > 350) { lastAutoGather = now; tryGather(); autoTarget = null; autoStuckMs = 0; }
+        } else {
+          dx = tdx / td; dy = tdy / td;
+          // if we can't make progress (crystal trapped behind a wall/water), avoid it and retarget
+          const moved = Math.hypot(me.x - autoPrevX, me.y - autoPrevY);
+          autoStuckMs = moved < 0.6 ? autoStuckMs + dt * 1000 : 0;
+          if (autoStuckMs > 1100) { autoAvoid = autoTarget.id; autoAvoidUntil = now + 5000; autoTarget = null; autoStuckMs = 0; }
+        }
       }
+      autoPrevX = me.x; autoPrevY = me.y;
       if (autoMint) maybeAutoMint(now);
     }
     const mag = Math.hypot(dx, dy);

@@ -8,18 +8,19 @@ _Last updated during the build session. This is the single source of truth for w
 | --- | --- |
 | **Live URL** | https://monad-meadow.lorq.workers.dev |
 | **GitHub repo** | https://github.com/ROHITCRAFTSYT/monad-meadow |
-| **Contract (Monad Testnet, 10143)** | `0xe8B6c37f78475024a5d08DB3dF358983a45357A7` |
-| **Explorer (verified source)** | https://testnet.monadscan.com/address/0xe8B6c37f78475024a5d08DB3dF358983a45357A7 |
+| **Contract (Monad Testnet, 10143)** | `0xb1c49827eDB08AD2E34f002D962EB8B87B855296` |
+| **Explorer (verified source)** | https://testnet.monadscan.com/address/0xb1c49827eDB08AD2E34f002D962EB8B87B855296 |
 | **Deployment** | Cloudflare Workers + Durable Objects (game) · Monad Testnet (contract) |
-| **Example live mint tx** | [paste a recent tx hash from the current contract] |
+| **Example live mint tx** | 0xb1a2f3b7c233956eb0cc260a0cce22bc5201086d7eec51bd3f2b86ebbc6541b9 |
 
 ## ✅ Done
 
 **Contract (`contracts/`)**
 - `MonadMeadow.sol` — ERC-721 + on-chain marketplace, OpenZeppelin (Ownable, ReentrancyGuard), fully on-chain SVG metadata.
-- `mintItem(uint8)` payable (micro-tx, 0.01–0.05 MON), `list/cancelListing/buy` (escrow marketplace, 2.5% treasury fee), dragon economy (`claimDragonBounty` +10 MON, `payDeathPenalty` −5 MON), owner controls (`setMintPrice`, `setFeeBps`, `withdrawTreasury`).
+- `mintItem(uint8)` payable (micro-tx, 0.01–0.05 MON), `list/cancelListing/buy` (escrow marketplace, 2.5% treasury fee), owner controls (`setMintPrice`, `setFeeBps`, `withdrawTreasury`), plus `tokenURI`/`kindName` and the ERC-721/Ownable surface. **No reward/bounty/penalty functions** — `claimReward`, `claimDragonBounty()`, and `payDeathPenalty()` were removed as drainable-by-anyone holes.
+- **Redeployed as a hardened, security-audited build.** No unbacked payout paths: the only inbound MON is a mint price or an escrowed buyer payment, all under a reentrancy guard.
 - **Deployed + verified** on Monad testnet (MonadScan + MonadVision, "perfect match").
-- **16 Foundry tests pass** — mint pricing, escrow list/buy, cancel/refund, fee accounting, owner-only permissions, metadata.
+- **Foundry tests pass** — mint pricing, escrow list/buy, cancel/refund, fee accounting, owner-only permissions, metadata.
 
 **Game (`worker/` + `public/`)**
 - Cloudflare Worker + Durable Object `WorldRoom` — realtime multiplayer over WebSockets. **Verified live** with a 2-client test (join/move/world-sync all work).
@@ -28,9 +29,11 @@ _Last updated during the build session. This is the single source of truth for w
 - **Collision / spatial awareness** — 143 solid colliders (trees, fences, dungeon walls, props) with per-axis sliding. Sprite no longer walks through things.
 - **Wallet** — connect via injected wallet (MetaMask etc.), auto add/switch Monad testnet, balance display. **Persists across reloads** (silent `eth_accounts` restore).
 - **On-chain flows in-game** — gather crystals → mint (micro-tx) → list/buy/cancel in Meadow Market (macro-tx, any price). Every crystal shows its MON value.
-- **Dragon boss fight** — PvE dungeon encounter with real economic stakes: win → claim 10 MON bounty (`claimDragonBounty()`), lose → pay 5 MON penalty (`payDeathPenalty()`). Real-time health bars, attack feedback, respawn. Bounties/penalties settled on-chain.
+- **Dragon boss fight** — cosmetic PvE dungeon encounter, no funds at stake: win → a rare **Tidecrystal** drops into your satchel (mint it normally), lose → respawn, nothing lost. Real-time health bars, attack feedback, respawn.
+- **Idle auto-miner** — after ~6s of no input an RL-style autonomous agent takes over the sprite, walks to the highest value-weighted nearby crystal and gathers it; optional auto-mint toggle mints as it goes. Any input hands control back.
 - Chat, floating name/chat bubbles, confetti on mint/buy, optional ambient audio.
 - Zero client dependencies (raw JSON-RPC + hardcoded selectors) → demo-robust.
+- **Server hardening** — the `WorldRoom` Durable Object is rate-limited, enforces a per-room player cap, and sanitizes room codes.
 
 **Docs / repo**
 - `README.md` (run-it-yourself instructions, architecture, the four links), `.monskills` metadata, `SOCIAL.md` (post copy + 30s demo shot-list), `LICENSE` (MIT + Kenney CC0 note).
