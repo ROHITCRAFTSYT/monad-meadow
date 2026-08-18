@@ -21,6 +21,7 @@ const SEL = {
   ownerOf: "0x6352211e", // ownerOf(uint256)
   kindOf: "0x2345e28c", // kindOf(uint256)
   nextTokenId: "0x75794a3c", // nextTokenId()
+  tokenURI: "0xc87b56dd", // tokenURI(uint256)
 };
 let CHAIN_HEX = "0x279f"; // 10143 by default; set from CFG.chainId at boot
 
@@ -126,6 +127,29 @@ async function readOwner(id) {
 }
 async function readKind(id) {
   return parseInt(await ethCall(SEL.kindOf + encUint(id)), 16);
+}
+// read the token's fully on-chain metadata (data: URI) and pull out its SVG image
+async function readTokenImage(id) {
+  const r = (await ethCall(SEL.tokenURI + encUint(id))).replace(/^0x/, "");
+  const len = parseInt(r.slice(64, 128), 16);
+  const hex = r.slice(128, 128 + len * 2);
+  let s = "";
+  for (let i = 0; i < hex.length; i += 2) s += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+  const json = JSON.parse(atob(s.split(",")[1])); // data:application/json;base64,...
+  return json.image; // data:image/svg+xml;base64,...
+}
+// swap a placeholder gem for the crystal's real on-chain art once it loads
+async function loadOnchainArt(id, gemEl) {
+  if (!gemEl) return;
+  try {
+    const src = await readTokenImage(id);
+    if (!src) return;
+    const img = new Image();
+    img.className = "gem onchain-art";
+    img.title = "Fully on-chain SVG — rendered straight from the contract";
+    img.onload = () => { if (gemEl.parentNode) gemEl.replaceWith(img); };
+    img.src = src;
+  } catch {}
 }
 
 // ------------------------------------------------------------------ wallet
@@ -1660,6 +1684,7 @@ async function refreshMarket() {
         btn.onclick = () => openListModal(r.id, r.kind);
         card.querySelector(".act").appendChild(btn);
         list2.appendChild(card);
+        loadOnchainArt(r.id, card.querySelector(".gem")); // show the real on-chain SVG
       }
       for (const r of mineListed) {
         const card = document.createElement("div");
@@ -1673,6 +1698,13 @@ async function refreshMarket() {
         btn.onclick = () => cancelToken(r.id, r.kind);
         card.querySelector(".act").appendChild(btn);
         list2.appendChild(card);
+        loadOnchainArt(r.id, card.querySelector(".gem"));
+      }
+      if (mineOwned.length || mineListed.length) {
+        const note = document.createElement("div");
+        note.className = "onchain-note";
+        note.innerHTML = "⛓ Art above is the token's <b>fully on-chain SVG</b> — read live from the contract, no IPFS.";
+        list2.appendChild(note);
       }
     }
   } catch (e) {
