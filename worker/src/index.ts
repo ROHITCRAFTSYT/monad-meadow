@@ -43,6 +43,17 @@ const WATER = [
 ];
 const DUNGEON = { x0: (GCOLS - 13) * TILE, y0: 2 * TILE, x1: (GCOLS - 3 + 1) * TILE, y1: (10 + 1) * TILE };
 
+// Server-authoritative dragon boss: it wanders the dungeon and chases nearby
+// players, so every client sees the same dragon in the same place.
+const DRAGON_MAX_HP = 60;
+const DRAGON_SPEED = 62;      // px/s
+const DRAGON_AGGRO = 440;     // chase players within this range
+const DRAGON_HIT = 4;         // hp removed per player attack
+const DRAGON_TICK_MS = 180;
+const DRAGON_RESPAWN_MS = 9000;
+const ATTACK_COOLDOWN_MS = 220;
+const DIN = { x0: DUNGEON.x0 + TILE, y0: DUNGEON.y0 + TILE, x1: DUNGEON.x1 - TILE, y1: DUNGEON.y1 - TILE }; // interior
+
 function spawnable(x: number, y: number): boolean {
   // keep crystals out of the walled dungeon arena (with a small margin)
   if (x >= DUNGEON.x0 - 30 && x <= DUNGEON.x1 + 30 && y >= DUNGEON.y0 - 30 && y <= DUNGEON.y1 + 30) return false;
@@ -116,6 +127,10 @@ export class WorldRoom {
   private crystals = new Map<number, Crystal>();
   private nextCrystalId = 1;
   private spawning = false;
+  // shared dragon state
+  private dragon = { x: (DIN.x0 + DIN.x1) / 2, y: (DIN.y0 + DIN.y1) / 2, hp: DRAGON_MAX_HP, alive: true, hx: 1, hy: 0 };
+  private dragonLoop = false;
+  private lastAttack = new Map<string, number>(); // playerId -> ts
 
   constructor(state: DurableObjectState) {
     this.state = state;
@@ -148,6 +163,7 @@ export class WorldRoom {
       for (let i = 0; i < MAX_CRYSTALS; i++) this.addCrystal();
     }
     this.ensureSpawning();
+    this.ensureDragon();
 
     const player: Player = {
       id: crypto.randomUUID().slice(0, 8),
@@ -167,6 +183,7 @@ export class WorldRoom {
       world: { w: WORLD_W, h: WORLD_H },
       players: [...this.players.values()].filter((p) => p.id !== player.id),
       crystals: [...this.crystals.values()],
+      dragon: { x: Math.round(this.dragon.x), y: Math.round(this.dragon.y), hp: this.dragon.hp, maxHp: DRAGON_MAX_HP, alive: this.dragon.alive },
     });
 
     // Tell everyone else about the newcomer.
@@ -233,7 +250,63 @@ export class WorldRoom {
         this.broadcast({ type: "celebrate", id: me.id, kind }, ws);
         break;
       }
+      case "attack": {
+        const d = this.dragon;
+        if (!d.alive) return;
+        if (dist(me.x, me.y, d.x, d.y) > 150) return; // must be in melee range (server-checked)
+        const now = Date.now();
+        if (now - (this.lastAttack.get(me.id) || 0) < ATTACK_COOLDOWN_MS) return;
+        this.lastAttack.set(me.id, now);
+        d.hp = Math.max(0, d.hp - DRAGON_HIT);
+        this.broadcast({ type: "dragonHit", x: Math.round(d.x), y: Math.round(d.y), by: me.id, hp: d.hp }, null);
+        if (d.hp === 0) {
+          d.alive = false;
+          this.broadcast({ type: "dragonDown", by: me.id, name: me.name }, null);
+          setTimeout(() => {
+            d.hp = DRAGON_MAX_HP; d.alive = true;
+            d.x = (DIN.x0 + DIN.x1) / 2; d.y = (DIN.y0 + DIN.y1) / 2;
+            this.broadcast({ type: "dragonRespawn" }, null);
+          }, DRAGON_RESPAWN_MS);
+        }
+        break;
+      }
     }
+  }
+
+  // The dragon roams the dungeon; it chases the nearest player in range, else
+  // drifts. Runs while at least one player is connected.
+  private ensureDragon() {
+    if (this.dragonLoop) return;
+    this.dragonLoop = true;
+    let prev = Date.now();
+    const tick = () => {
+      if (this.players.size === 0) { this.dragonLoop = false; return; }
+      const now = Date.now();
+      const dt = Math.min(0.4, (now - prev) / 1000); prev = now;
+      const d = this.dragon;
+      if (d.alive) {
+        let target: Player | null = null, best = DRAGON_AGGRO;
+        for (const p of this.players.values()) {
+          const dd = dist(p.x, p.y, d.x, d.y);
+          if (dd < best) { best = dd; target = p; }
+        }
+        if (target) {
+          const a = Math.atan2(target.y - d.y, target.x - d.x);
+          d.hx = Math.cos(a); d.hy = Math.sin(a);
+        } else if (Math.random() < 0.04) {
+          const a = Math.random() * 6.283; d.hx = Math.cos(a); d.hy = Math.sin(a);
+        }
+        d.x += d.hx * DRAGON_SPEED * dt;
+        d.y += d.hy * DRAGON_SPEED * dt;
+        if (d.x < DIN.x0) { d.x = DIN.x0; d.hx = Math.abs(d.hx); }
+        if (d.x > DIN.x1) { d.x = DIN.x1; d.hx = -Math.abs(d.hx); }
+        if (d.y < DIN.y0) { d.y = DIN.y0; d.hy = Math.abs(d.hy); }
+        if (d.y > DIN.y1) { d.y = DIN.y1; d.hy = -Math.abs(d.hy); }
+      }
+      this.broadcast({ type: "dragon", x: Math.round(d.x), y: Math.round(d.y), hp: d.hp, alive: d.alive }, null);
+      setTimeout(tick, DRAGON_TICK_MS);
+    };
+    setTimeout(tick, DRAGON_TICK_MS);
   }
 
   private onClose(ws: WebSocket) {
@@ -241,6 +314,7 @@ export class WorldRoom {
     if (!me) return;
     this.players.delete(ws);
     this.meta.delete(ws);
+    this.lastAttack.delete(me.id);
     this.broadcast({ type: "leave", id: me.id }, null);
     try {
       ws.close();

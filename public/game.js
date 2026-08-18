@@ -328,13 +328,16 @@ function markInput() {
   addEventListener(ev, markInput, { passive: true, capture: true })
 );
 
-// Dragon boss fight system
-let dragon = null; // {x, y, health, maxHealth, lastAttack, phase}
+// Dragon boss fight — the dragon is SERVER-authoritative (position + hp come from
+// the room), so everyone sees the same dragon. The client only renders it,
+// tracks its own player HP, and sends "attack" requests.
+let dragon = null; // {x,y,rx,ry,health,maxHealth,alive}
 let dungeonBounds = null; // {x0, y0, x1, y1} dungeon area
-let playerHealth = 100; // player health points
+let playerHealth = 100; // player health points (local)
 const PLAYER_MAX_HEALTH = 100;
-const DRAGON_HEALTH = 50;
-let dragonDefeated = false;
+const DRAGON_HEALTH = 60; // display fallback; server owns the real value
+let dragonDefeated = false; // true while the dragon is dead (server said down)
+let lastAttackSent = 0, lastDragonDmg = 0, lastRoarHint = 0;
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
@@ -674,22 +677,13 @@ function buildWorld() {
   ];
   for (const [c, r] of lootSpots) place("dungeon", (c + r) % 2 ? T.chest : T.barrel, c, r, 32, "prop");
 
-  // --- dragon boss --------------------------------------------------------
+  // --- dungeon bounds (the dragon itself is created from server state) -----
   dungeonBounds = {
     x0: dungeon.c0 * TILE,
     y0: dungeon.r0 * TILE,
     x1: dungeon.c1 * TILE + TILE,
     y1: dungeon.r1 * TILE + TILE
   };
-  dragon = {
-    x: dungeon.c0 * TILE + TILE * 1.75,
-    y: dungeon.r0 * TILE + TILE * 2.1,
-    health: DRAGON_HEALTH,
-    maxHealth: DRAGON_HEALTH,
-    lastAttack: 0,
-    phase: 0
-  };
-  dragonDefeated = false;
   playerHealth = PLAYER_MAX_HEALTH;
 
   decor.sort((a, b) => a.ay - b.ay);
@@ -711,17 +705,11 @@ addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 $("chatInput").addEventListener("focus", () => (typing = true));
 $("chatInput").addEventListener("blur", () => (typing = false));
 
-// Click/tap for dragon attacks
+// Click/tap for dragon attacks — only counts near the living dragon, not on HUD
 addEventListener("click", (e) => {
-  // ignore clicks on HUD/modal panels — only world clicks attack the dragon
   if (e.target && e.target.closest && e.target.closest(".hud, .modal")) return;
-  if (!me || !dragon || dragonDefeated || playerHealth <= 0) return;
-  const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
-                   me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
-  const nearDragon = Math.hypot(me.x - dragon.x, me.y - dragon.y) < 180;
-  if (inDungeon && nearDragon) {
-    keys["click"] = true;
-  }
+  if (!me || !dragon || !dragon.alive || playerHealth <= 0) return;
+  if (Math.hypot(me.x - dragon.rx, me.y - dragon.ry) < 150) keys["click"] = true;
 });
 
 function tryGather() {
@@ -758,6 +746,10 @@ function handleMsg(m) {
       for (const p of m.players) players.set(p.id, { ...p, rx: p.x, ry: p.y });
       crystals.clear();
       for (const c of m.crystals) crystals.set(c.id, { ...c, phase: Math.random() * 6.28 });
+      if (m.dragon) {
+        dragon = { x: m.dragon.x, y: m.dragon.y, rx: m.dragon.x, ry: m.dragon.y, health: m.dragon.hp, maxHealth: m.dragon.maxHp, alive: m.dragon.alive };
+        dragonDefeated = !m.dragon.alive;
+      }
       setPresence();
       addChat(null, `You wandered into room ${ROOM}. Share the code or QR to invite friends 🌿`, true);
       sendSavedName();
@@ -801,6 +793,29 @@ function handleMsg(m) {
     }
     case "celebrate":
       burstConfetti(m.id, m.kind);
+      break;
+    case "dragon": {
+      // server position/health update (interpolated toward on render)
+      if (!dragon) dragon = { x: m.x, y: m.y, rx: m.x, ry: m.y, health: m.hp, maxHealth: DRAGON_HEALTH, alive: m.alive };
+      dragon.x = m.x; dragon.y = m.y; dragon.health = m.hp; dragon.alive = m.alive;
+      break;
+    }
+    case "dragonHit": {
+      if (dragon) { dragon.health = m.hp; dragon.hitFlash = performance.now(); }
+      for (let i = 0; i < 8; i++) confetti.push({ x: m.x, y: m.y - 10, vx: (Math.random() - 0.5) * 200, vy: (Math.random() - 0.7) * 160, life: 0.5 + Math.random() * 0.4, color: "#ff6b5a" });
+      break;
+    }
+    case "dragonDown": {
+      if (dragon) dragon.alive = false;
+      dragonDefeated = true;
+      if (me && m.by === me.id) handleDragonDefeat();
+      else { toast(`🐉 ${m.name || "A hero"} defeated the dragon!`, 4000); burstConfetti(m.by, 4); }
+      break;
+    }
+    case "dragonRespawn":
+      if (dragon) { dragon.alive = true; dragon.health = dragon.maxHealth; dragon.hitFlash = 0; }
+      dragonDefeated = false;
+      toast("🐉 The dragon has risen again…", 2500);
       break;
   }
 }
@@ -933,38 +948,31 @@ function update(dt, now) {
     }
   }
 
-  // --- dragon combat system ------------------------------------------------
-  if (me && dragon && !dragonDefeated) {
-    const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
-                     me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
-    const nearDragon = Math.hypot(me.x - dragon.x, me.y - dragon.y) < 180;
-
-    if (inDungeon && nearDragon) {
-      // Dragon only attacks once the player is inside the dungeon and close enough
-      if (now - dragon.lastAttack > 1200) {
-        playerHealth -= 5;
-        dragon.lastAttack = now;
-        toast("🐉 Dragon attacks! -5 HP");
-        if (playerHealth <= 0) {
-          handlePlayerDeath();
+  // --- dragon combat (dragon state is server-authoritative) ----------------
+  if (dragon) {
+    // smoothly interpolate the dragon toward its latest server position
+    dragon.rx += (dragon.x - dragon.rx) * Math.min(1, dt * 8);
+    dragon.ry += (dragon.y - dragon.ry) * Math.min(1, dt * 8);
+    if (me && dragon.alive) {
+      const nearDragon = Math.hypot(me.x - dragon.rx, me.y - dragon.ry) < 150;
+      if (nearDragon) {
+        // the dragon claws you while you're in melee range (local HP)
+        if (now - lastDragonDmg > 1000) {
+          lastDragonDmg = now;
+          playerHealth -= 6;
+          if (playerHealth <= 0) handlePlayerDeath();
         }
-      }
-
-      // Player attacks the dragon only when in melee range and actively clicking
-      if (keys["click"]) {
-        dragon.health -= 3;
-        keys["click"] = false;
-        toast("⚔️ Hit! Dragon -3 HP");
-
-        if (dragon.health <= 0) {
-          handleDragonDefeat();
+        // your click/tap is an attack — ask the server to apply the hit
+        if (keys["click"]) {
+          keys["click"] = false;
+          if (now - lastAttackSent > 200 && ws && ws.readyState === 1) {
+            lastAttackSent = now;
+            ws.send(JSON.stringify({ type: "attack" }));
+          }
         }
-      }
-    } else if (inDungeon && !nearDragon) {
-      // if the player is in the dungeon but not yet near the dragon, give them a clear hint
-      if (now - dragon.lastAttack > 3000) {
-        toast("🐉 The dragon roars from deep in the dungeon...", 1800);
-        dragon.lastAttack = now;
+      } else if (Math.hypot(me.x - dragon.rx, me.y - dragon.ry) < 340 && now - lastRoarHint > 4000) {
+        lastRoarHint = now;
+        toast("🐉 The dragon prowls nearby — get close and click to strike.", 1800);
       }
     }
   }
@@ -1036,7 +1044,7 @@ function render(now) {
   for (const c of crystals.values()) items.push({ ay: c.y, t: 1, c });
   for (const p of players.values()) items.push({ ay: p.ry, t: 2, p, self: false });
   if (me) items.push({ ay: me.y, t: 2, p: me, self: true });
-  if (dragon && !dragonDefeated) items.push({ ay: dragon.y, t: 3, d: dragon });
+  if (dragon && dragon.alive) items.push({ ay: dragon.ry, t: 3, d: dragon });
   items.sort((a, b) => a.ay - b.ay);
 
   for (const it of items) {
@@ -1060,10 +1068,10 @@ function render(now) {
   drawTradeOverlay(now, vw, vh);
 
   // Draw player health HUD (screen-space, not world-space)
-  if (me && dragon && !dragonDefeated) {
+  if (me && dragon) {
     const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
                      me.y >= dungeonBounds.y0 && me.y <= dungeonBounds.y1;
-    if (inDungeon || playerHealth < PLAYER_MAX_HEALTH) {
+    if ((inDungeon && dragon.alive) || playerHealth < PLAYER_MAX_HEALTH) {
       const hx = 20, hy = 80;
       const hw = 200, hh = 20;
       
@@ -1249,6 +1257,8 @@ function drawCrystal(c, now) {
 }
 
 function drawDragon(d, now) {
+  // render at the interpolated (rx,ry) position; keep hp/alive from the object
+  d = Object.assign({}, d, { x: d.rx != null ? d.rx : d.x, y: d.ry != null ? d.ry : d.y });
   const pulse = 0.5 + 0.5 * Math.sin(now / 400) * d.health / d.maxHealth;
   const isAlive = d.health > 0;
 
