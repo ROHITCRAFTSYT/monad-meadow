@@ -52,6 +52,8 @@ const DRAGON_HIT = 4;         // hp removed per player attack
 const DRAGON_TICK_MS = 180;
 const DRAGON_RESPAWN_MS = 9000;
 const ATTACK_COOLDOWN_MS = 220;
+const BREATH_RANGE = 340;      // only breathes fire when a player is this close
+const BREATH_COOLDOWN_MS = 4200;
 const DIN = { x0: DUNGEON.x0 + TILE, y0: DUNGEON.y0 + TILE, x1: DUNGEON.x1 - TILE, y1: DUNGEON.y1 - TILE }; // interior
 
 function spawnable(x: number, y: number): boolean {
@@ -131,6 +133,8 @@ export class WorldRoom {
   private dragon = { x: (DIN.x0 + DIN.x1) / 2, y: (DIN.y0 + DIN.y1) / 2, hp: DRAGON_MAX_HP, alive: true, hx: 1, hy: 0 };
   private dragonLoop = false;
   private lastAttack = new Map<string, number>(); // playerId -> ts
+  private lastBreath = 0;      // last fire-breath timestamp
+  private dragonDefeats = 0;   // how many times the dragon has been slain in this room
 
   constructor(state: DurableObjectState) {
     this.state = state;
@@ -183,7 +187,7 @@ export class WorldRoom {
       world: { w: WORLD_W, h: WORLD_H },
       players: [...this.players.values()].filter((p) => p.id !== player.id),
       crystals: [...this.crystals.values()],
-      dragon: { x: Math.round(this.dragon.x), y: Math.round(this.dragon.y), hp: this.dragon.hp, maxHp: DRAGON_MAX_HP, alive: this.dragon.alive },
+      dragon: { x: Math.round(this.dragon.x), y: Math.round(this.dragon.y), hp: this.dragon.hp, maxHp: DRAGON_MAX_HP, alive: this.dragon.alive, defeats: this.dragonDefeats },
     });
 
     // Tell everyone else about the newcomer.
@@ -261,7 +265,8 @@ export class WorldRoom {
         this.broadcast({ type: "dragonHit", x: Math.round(d.x), y: Math.round(d.y), by: me.id, hp: d.hp }, null);
         if (d.hp === 0) {
           d.alive = false;
-          this.broadcast({ type: "dragonDown", by: me.id, name: me.name }, null);
+          this.dragonDefeats++;
+          this.broadcast({ type: "dragonDown", by: me.id, name: me.name, defeats: this.dragonDefeats }, null);
           setTimeout(() => {
             d.hp = DRAGON_MAX_HP; d.alive = true;
             d.x = (DIN.x0 + DIN.x1) / 2; d.y = (DIN.y0 + DIN.y1) / 2;
@@ -293,6 +298,11 @@ export class WorldRoom {
         if (target) {
           const a = Math.atan2(target.y - d.y, target.x - d.x);
           d.hx = Math.cos(a); d.hy = Math.sin(a);
+          // wind up a fire breath aimed at the target (clients telegraph, then burn)
+          if (best < BREATH_RANGE && now - this.lastBreath > BREATH_COOLDOWN_MS) {
+            this.lastBreath = now;
+            this.broadcast({ type: "dragonBreath", x: Math.round(d.x), y: Math.round(d.y), tx: Math.round(target.x), ty: Math.round(target.y) }, null);
+          }
         } else if (Math.random() < 0.04) {
           const a = Math.random() * 6.283; d.hx = Math.cos(a); d.hy = Math.sin(a);
         }

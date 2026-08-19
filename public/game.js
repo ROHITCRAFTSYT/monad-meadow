@@ -362,6 +362,8 @@ const PLAYER_MAX_HEALTH = 100;
 const DRAGON_HEALTH = 60; // display fallback; server owns the real value
 let dragonDefeated = false; // true while the dragon is dead (server said down)
 let lastAttackSent = 0, lastDragonDmg = 0, lastRoarHint = 0;
+let dragonDefeats = 0;      // times this room's dragon has been slain
+const breaths = [];         // active fire-breath effects {x,y,tx,ty,t0,hit}
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
@@ -749,6 +751,7 @@ function handleMsg(m) {
       if (m.dragon) {
         dragon = { x: m.dragon.x, y: m.dragon.y, rx: m.dragon.x, ry: m.dragon.y, health: m.dragon.hp, maxHealth: m.dragon.maxHp, alive: m.dragon.alive };
         dragonDefeated = !m.dragon.alive;
+        dragonDefeats = m.dragon.defeats || 0;
       }
       setPresence();
       addChat(null, `You wandered into room ${ROOM}. Share the code or QR to invite friends 🌿`, true);
@@ -803,14 +806,22 @@ function handleMsg(m) {
     case "dragonHit": {
       if (dragon) { dragon.health = m.hp; dragon.hitFlash = performance.now(); }
       if (confetti.length < 600) for (let i = 0; i < 8; i++) confetti.push({ x: m.x, y: m.y - 10, vx: (Math.random() - 0.5) * 200, vy: (Math.random() - 0.7) * 160, life: 0.5 + Math.random() * 0.4, color: "#ff6b5a" });
+      sfxHit();
+      break;
+    }
+    case "dragonBreath": {
+      breaths.push({ x: m.x, y: m.y, tx: m.tx, ty: m.ty, t0: performance.now(), hit: false });
+      sfxRoar();
       break;
     }
     case "dragonDown": {
       if (dragon) dragon.alive = false;
+      dragonDefeats = m.defeats || dragonDefeats;
+      sfxVictory();
       // NOTE: let handleDragonDefeat own the dragonDefeated flag — setting it here
       // first would make handleDragonDefeat early-return and skip the reward.
       if (me && m.by === me.id) handleDragonDefeat();
-      else { dragonDefeated = true; toast(`🐉 ${m.name || "A hero"} defeated the dragon!`, 4000); burstConfetti(m.by, 4); }
+      else { dragonDefeated = true; toast(`🐉 ${m.name || "A hero"} slew the dragon! (×${dragonDefeats} in this room)`, 4500); burstConfetti(m.by, 4); }
       break;
     }
     case "dragonRespawn":
@@ -978,6 +989,27 @@ function update(dt, now) {
     }
   }
 
+  // fire-breath: telegraph then burn. Move off the marked spot in time to dodge.
+  for (let i = breaths.length - 1; i >= 0; i--) {
+    const b = breaths[i];
+    const age = now - b.t0;
+    if (age > 1500) { breaths.splice(i, 1); continue; }
+    if (age >= 900 && !b.hit) {
+      b.hit = true; // evaluate the hit once, at the moment the fire lands
+      if (me && Math.hypot(me.x - b.tx, me.y - b.ty) < 74) {
+        playerHealth -= 15;
+        toast("🔥 Scorched by dragon fire! −15 HP", 1600);
+        if (playerHealth <= 0) handlePlayerDeath();
+      }
+    }
+  }
+
+  // regenerate HP when out of combat
+  if (me && playerHealth < PLAYER_MAX_HEALTH) {
+    const inCombat = dragon && dragon.alive && Math.hypot(me.x - dragon.rx, me.y - dragon.ry) < 210;
+    if (!inCombat) playerHealth = Math.min(PLAYER_MAX_HEALTH, playerHealth + 7 * dt);
+  }
+
   // confetti
   for (let i = confetti.length - 1; i >= 0; i--) {
     const p = confetti[i];
@@ -1054,6 +1086,9 @@ function render(now) {
     else if (it.t === 2) drawPlayer(it.p, now, it.self);
     else if (it.t === 3) drawDragon(it.d, now);
   }
+
+  // dragon fire-breath (telegraph + blast)
+  for (const b of breaths) drawBreath(b, now);
 
   // confetti on top
   for (const c of confetti) {
@@ -1158,6 +1193,32 @@ function drawTradeOverlay(now, vw, vh) {
     ctx.fillText(`${arrow}${marketPrice[k]}`, tx, tickerY + tickerH / 2 + 1);
   }
   ctx.restore();
+}
+
+function drawBreath(b, now) {
+  const age = now - b.t0;
+  if (age < 900) {
+    // telegraph: an aim beam from the dragon + a growing warning ring on the spot
+    const p = age / 900;
+    ctx.strokeStyle = `rgba(255,120,0,${0.12 + 0.22 * p})`;
+    ctx.lineWidth = 10 * (1 - p) + 2;
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.tx, b.ty); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,70,0,${0.35 + 0.5 * p})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.arc(b.tx, b.ty, 66 * p + 10, 0, 6.28); ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    // fire blast
+    const f = (age - 900) / 600;
+    const r = 74 * (1 - f * 0.25);
+    const g = ctx.createRadialGradient(b.tx, b.ty, 4, b.tx, b.ty, r);
+    g.addColorStop(0, `rgba(255,244,150,${0.95 * (1 - f)})`);
+    g.addColorStop(0.5, `rgba(255,120,20,${0.75 * (1 - f)})`);
+    g.addColorStop(1, "rgba(200,30,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(b.tx, b.ty, r, 0, 6.28); ctx.fill();
+  }
 }
 
 function drawWater(w, now) {
@@ -1355,7 +1416,7 @@ function drawDragon(d, now) {
   ctx.fillStyle = "#fff";
   ctx.textAlign = "center";
   ctx.font = "700 12px Segoe UI";
-  ctx.fillText(`DRAGON ${Math.max(0, Math.round(d.health))}/${d.maxHealth}`, d.x, hpY - 9);
+  ctx.fillText(`DRAGON ${Math.max(0, Math.round(d.health))}/${d.maxHealth}${dragonDefeats ? "  ·  slain ×" + dragonDefeats : ""}`, d.x, hpY - 9);
 
   if (me && dungeonBounds) {
     const inDungeon = me.x >= dungeonBounds.x0 && me.x <= dungeonBounds.x1 &&
@@ -1771,6 +1832,20 @@ function chime(freq) {
   o.connect(g); g.connect(actx.destination);
   o.start(); o.stop(actx.currentTime + 0.5);
 }
+// combat SFX (all gated on the ambient-audio toggle)
+function tone(type, f0, f1, dur, vol) {
+  if (!audioOn || !actx) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(actx.destination); o.start(); o.stop(t + dur);
+}
+function sfxHit() { tone("square", 320, 180, 0.12, 0.08); }
+function sfxRoar() { tone("sawtooth", 150, 55, 0.6, 0.13); }
+function sfxVictory() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone("sine", f, f, 0.18, 0.1), i * 110)); }
 $("autoBtn").onclick = async () => {
   if (!autoMint && !wallet.connected) { await connectWallet(); if (!wallet.connected) return; }
   autoMint = !autoMint;
