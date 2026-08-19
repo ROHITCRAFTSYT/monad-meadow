@@ -416,15 +416,16 @@ function tile(sheet, idx, wx, wy, size, flip) {
   }
 }
 
-// tile indices
+// tile indices (verified against the Kenney town/farm/dungeon sheets)
 const T = {
   grass: 0, grassA: 1, grassB: 2,          // town
-  treeGreen: 4, treeRound: 5, treeAutumn: 3,
-  bush: 6, berry: 30, path: 39, pathA: 40, stone: 43, flower: 2,
-  fenceH: 45, fenceMid: 46,
+  treeGreen: 4, treeRound: 5, treeAutumn: 9, // 3 was a bare/dead tree — fixed to a real autumn tree
+  bush: 8, berry: 30, path: 39, pathA: 40, stone: 43, flower: 2,
+  fenceH: 45, fenceV: 56, fenceTL: 44, fenceTR: 47, fenceBL: 80, fenceBR: 83, // proper fence frame
   soil: 0, soilA: 1,                        // farm
   crops: [8, 44, 32, 18, 20],               // farm: carrot, pumpkin, corn, eggplant, plant
   animals: [120, 121, 122],                 // farm: sheep, cow, chicken
+  hay: 55, barn: 90,                        // farm decor
   dFloor: 0, dFloorA: 12, dFloorB: 24, dWall: 2, dWallA: 3, // dungeon
   chest: 54, barrel: 124, gem: 53,
 };
@@ -591,9 +592,19 @@ function buildWorld() {
     }
     return o;
   };
-  const fenceRing = (R) => {
-    for (let c = R.c0 - 1; c <= R.c1 + 1; c++) { place("town", T.fenceH, c, R.r0 - 1, 40, "fence"); if (c !== R.c0 + ((R.c1 - R.c0) >> 1)) place("town", T.fenceH, c, R.r1 + 1, 40, "fence"); }
-    for (let r = R.r0; r <= R.r1; r++) { place("town", T.fenceH, R.c0 - 1, r, 40, "fence"); place("town", T.fenceH, R.c1 + 1, r, 40, "fence"); }
+  // a proper fence border: horizontal rails on top/bottom, vertical rails on the
+  // sides, real corner posts, and a gate opening on the bottom edge
+  const fenceBorder = (R) => {
+    const L = R.c0 - 1, Rr = R.c1 + 1, T0 = R.r0 - 1, B = R.r1 + 1;
+    const gate = (L + Rr) >> 1;
+    for (let c = L; c <= Rr; c++) {
+      place("town", c === L ? T.fenceTL : c === Rr ? T.fenceTR : T.fenceH, c, T0, 42, "fence");
+      if (c !== gate) place("town", c === L ? T.fenceBL : c === Rr ? T.fenceBR : T.fenceH, c, B, 42, "fence");
+    }
+    for (let r = T0 + 1; r < B; r++) {
+      place("town", T.fenceV, L, r, 42, "fence");
+      place("town", T.fenceV, Rr, r, 42, "fence");
+    }
   };
 
   // --- forest grove: dense trees on a jittered grid ------------------------
@@ -611,21 +622,24 @@ function buildWorld() {
     for (const r of [midR - 2, midR + 2]) if (isGrass(c, r) && rnd() < 0.6) place("town", rnd() < 0.6 ? T.treeGreen : T.treeRound, c, r, 58, "tree");
   }
 
-  // --- farm: crop rows, perimeter fence w/ gate, animal pen, barn ----------
+  // --- farm: a tilled field with tidy crop rows and walking lanes ----------
+  // each planted row grows a single crop type; odd rows stay bare as lanes
   for (let r = farm.r0; r <= farm.r1; r++) {
+    if (r % 2 !== 0) continue; // leave a walking lane between rows
+    const crop = T.crops[(r >> 1) % T.crops.length];
     for (let c = farm.c0; c <= farm.c1; c++) {
       if (inR(c, r, pen)) continue;
-      if (r % 2 === 0) place("farm", T.crops[(c + r) % T.crops.length], c, r, 34); // neat rows
+      place("farm", crop, c, r, 32);
     }
   }
-  fenceRing(farm);
-  fenceRing(pen);
+  fenceBorder(farm);
+  fenceBorder(pen);
+  // animals graze in the pen
   for (let n = 0; n < 4; n++) {
     const c = pen.c0 + ((rnd() * (pen.c1 - pen.c0 + 1)) | 0), r = pen.r0 + ((rnd() * (pen.r1 - pen.r0 + 1)) | 0);
     place("farm", T.animals[(rnd() * T.animals.length) | 0], c, r, 32);
     const o = decor[decor.length - 1]; o.animal = true; o.bx = o.wx; o.by = o.wy; o.ph = rnd() * 6.28;
   }
-  place("farm", T.barrel, farm.c1, farm.r1, 34, "prop");
 
   // --- plaza: fountain at the crossroads, flower beds, benches -------------
   water.push({ x: (midC + 0.5) * TILE, y: (midR + 0.5) * TILE, rx: TILE * 1.15, ry: TILE * 0.9, fountain: true });
@@ -652,44 +666,6 @@ function buildWorld() {
   for (let n = 0; n < 30; n++) {
     const c = (rnd() * GCOLS) | 0, r = (rnd() * GROWS) | 0;
     if (isGrass(c, r) && !inR(c, r, forest)) place("town", rnd() < 0.5 ? T.flower : T.bush, c, r, 30);
-  }
-
-  // --- clear landmarks so the world feels alive ---------------------------
-  // central plaza buildings / market stalls
-  for (let i = -2; i <= 2; i++) {
-    place("town", T.stone, midC + i, midR - 5, 74, "prop");
-    place("town", T.stone, midC + i, midR + 5, 74, "prop");
-  }
-  for (let i = 0; i < 5; i++) {
-    place("town", T.flower, midC - 4 + i, midR - 1, 28);
-    place("town", T.flower, midC - 4 + i, midR + 1, 28);
-  }
-
-  // farm structures and sheds
-  for (let i = 0; i < 3; i++) {
-    place("farm", T.barrel, farm.c0 + 2 + i * 4, farm.r0 - 1, 30, "prop");
-    place("farm", T.barrel, farm.c0 + 2 + i * 4, farm.r1 + 1, 30, "prop");
-  }
-
-  // dramatic dungeon gate and interior props so it reads as a real dungeon
-  for (let i = 0; i < 5; i++) {
-    place("dungeon", T.dWall, dungeon.c0 + i, dungeon.r0 - 1, 52, "prop");
-    place("dungeon", T.dWall, dungeon.c0 + i, dungeon.r1 + 1, 52, "prop");
-  }
-  // Stone pillars and a flaming gate frame to make the entrance unmistakable
-  for (let i = 0; i < 3; i++) {
-    place("dungeon", T.dWallA, dungeon.c0 + 2 + i * 2, dungeon.r0 + 1, 64, "prop");
-    place("dungeon", T.dWallA, dungeon.c0 + 2 + i * 2, dungeon.r1 - 1, 64, "prop");
-  }
-  place("dungeon", T.chest, dungeon.c0 + 2, dungeon.r0 + 2, 34, "prop");
-  place("dungeon", T.barrel, dungeon.c0 + 5, dungeon.r0 + 5, 34, "prop");
-  place("dungeon", T.barrel, dungeon.c0 + 3, dungeon.r1 - 1, 34, "prop");
-
-  // create a visible fiery arena in the dungeon center
-  for (let i = 0; i < 10; i++) {
-    const px = dungeon.c0 + 2 + ((i * 1.2) | 0);
-    const py = dungeon.r0 + 3 + (i % 3);
-    place("dungeon", T.dFloorA, px, py, 28, "prop");
   }
 
   // --- dungeon loot: a few props tucked into the corners, clear of the door,
@@ -826,14 +802,15 @@ function handleMsg(m) {
     }
     case "dragonHit": {
       if (dragon) { dragon.health = m.hp; dragon.hitFlash = performance.now(); }
-      for (let i = 0; i < 8; i++) confetti.push({ x: m.x, y: m.y - 10, vx: (Math.random() - 0.5) * 200, vy: (Math.random() - 0.7) * 160, life: 0.5 + Math.random() * 0.4, color: "#ff6b5a" });
+      if (confetti.length < 600) for (let i = 0; i < 8; i++) confetti.push({ x: m.x, y: m.y - 10, vx: (Math.random() - 0.5) * 200, vy: (Math.random() - 0.7) * 160, life: 0.5 + Math.random() * 0.4, color: "#ff6b5a" });
       break;
     }
     case "dragonDown": {
       if (dragon) dragon.alive = false;
-      dragonDefeated = true;
+      // NOTE: let handleDragonDefeat own the dragonDefeated flag — setting it here
+      // first would make handleDragonDefeat early-return and skip the reward.
       if (me && m.by === me.id) handleDragonDefeat();
-      else { toast(`🐉 ${m.name || "A hero"} defeated the dragon!`, 4000); burstConfetti(m.by, 4); }
+      else { dragonDefeated = true; toast(`🐉 ${m.name || "A hero"} defeated the dragon!`, 4000); burstConfetti(m.by, 4); }
       break;
     }
     case "dragonRespawn":
@@ -1438,6 +1415,7 @@ function roundRect(x, y, w, h, r) {
 }
 
 function burstConfetti(id, kind) {
+  if (confetti.length > 800) return; // guard against unbounded growth while backgrounded
   const src = id === (me && me.id) ? me : players.get(id);
   const x = src ? src.x : world.w / 2;
   const y = src ? src.y : world.h / 2;
@@ -1510,12 +1488,14 @@ function handleDragonDefeat() {
 }
 
 function handlePlayerDeath() {
-  toast("💀 The dragon scorched you! Respawning…", 3000);
+  toast("💀 The dragon scorched you! Respawning at the meadow gate…", 3000);
   if (me) burstConfetti(me.id, 3);
-  playerHealth = PLAYER_MAX_HEALTH;
-  if (dragon) dragon.health = DRAGON_HEALTH;
-  dragonDefeated = false;
-  if (me) { me.x = 100; me.y = 100; }
+  playerHealth = PLAYER_MAX_HEALTH; // dragon HP is server-owned; don't touch it here
+  if (me) {
+    me.x = 100; me.y = 100;
+    // tell the server we moved, so others don't see a frozen ghost in the dungeon
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "move", x: me.x, y: me.y, facing: me.facing || 0 }));
+  }
 }
 
 async function openMintModal(kind) {
